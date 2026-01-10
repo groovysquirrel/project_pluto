@@ -1,0 +1,729 @@
+# ==============================================================================
+# PROJECT PLUTO - Docker Compose Configuration
+# ==============================================================================
+#
+# This file defines all the containers (services) that make up Project Pluto.
+# Think of it as a recipe that tells Docker exactly what to run and how.
+#
+# WHAT IS DOCKER COMPOSE?
+# Docker Compose is a tool that lets you define and run multiple Docker 
+# containers together. Instead of starting each container manually with long
+# commands, you define everything here and start it all with one command.
+#
+# HOW TO USE THIS FILE:
+#   1. Make sure Docker Desktop is installed and running
+#   2. Copy .env.example to .env and fill in your values
+#   3. Run: docker compose up -d
+#   4. Access the portal at http://localhost:8080
+#
+# USEFUL COMMANDS:
+#   docker compose up -d      # Start all services in background
+#   docker compose down       # Stop all services
+#   docker compose logs -f    # View logs from all services (Ctrl+C to exit)
+#   docker compose ps         # See status of all services
+#   docker compose restart    # Restart all services
+#
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# VERSION & NETWORKS
+# ------------------------------------------------------------------------------
+# We're using Docker Compose format version 3.8 (a common, stable version)
+
+# Networks allow containers to talk to each other by name instead of IP address.
+# For example, OpenWebUI can reach the database at "postgres:5432" instead of
+# needing to know the actual IP address.
+#
+# We define a subnet so we can assign a static IP to dnsmasq, making it
+# reliably discoverable by all containers.
+
+networks:
+  pluto-network:
+    name: pluto-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ------------------------------------------------------------------------------
+# VOLUMES
+# ------------------------------------------------------------------------------
+# Volumes are like external hard drives for containers. Without them, all data
+# would be lost when a container stops. Volumes persist data between restarts.
+#
+# Think of it like this:
+#   - Container = the application running
+#   - Volume = the USB drive where the application saves its files
+
+volumes:
+  # Database storage - your PostgreSQL data lives here
+  postgres-data:
+    name: pluto-postgres-data
+
+  # OpenWebUI storage - chat history, settings, uploaded files
+  openwebui-data:
+    name: pluto-openwebui-data
+
+  # n8n storage - workflows, credentials, execution history
+  n8n-data:
+    name: pluto-n8n-data
+
+  # ChromaDB storage - RAG vectors
+  chromadb-data:
+    name: pluto-chromadb-data
+
+  # Ollama storage - local models and cache
+  ollama-data:
+    name: pluto-ollama-data
+
+  # Management tools storage
+  portainer-data:
+    name: pluto-portainer-data
+  pgadmin-data:
+    name: pluto-pgadmin-data
+
+# ------------------------------------------------------------------------------
+# SERVICES (CONTAINERS)
+# ------------------------------------------------------------------------------
+# Each service below becomes a running container. They're listed in dependency
+# order - services that others depend on are listed first.
+
+services:
+
+  # ============================================================================
+  # TRAEFIK - REVERSE PROXY
+  # ============================================================================
+  # Traefik is a modern reverse proxy that routes traffic to your containers
+  # based on domain names. Instead of remembering ports (localhost:3001),
+  # you access services via friendly URLs (openwebui.pluto.local).
+  #
+  # Features:
+  #   - Automatic service discovery via Docker labels
+  #   - HTTPS with self-signed certificates
+  #   - Built-in dashboard for monitoring routes
+
+  traefik:
+    image: traefik:v2.11
+    container_name: pluto-traefik
+    restart: unless-stopped
+
+    # Security: no new privileges
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik needs these ports to receive traffic
+
+    ports:
+      - "80:80" # HTTP (redirects to HTTPS)
+      - "443:443" # HTTPS
+
+    volumes:
+      # Docker socket for auto-discovery (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Static configuration
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      # Dynamic configuration (TLS certs)
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      # Certificates
+      - ./traefik/certs:/etc/traefik/certs:ro
+
+    # Labels for Traefik's own dashboard
+    labels:
+      - "traefik.enable=true"
+      # Dashboard routing
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+
+    healthcheck:
+      test: [ "CMD", "traefik", "healthcheck", "--ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # DNSMASQ - INTERNAL DNS SERVER
+  # ============================================================================
+  # dnsmasq provides DNS resolution for *.pluto.local domains within the
+  # Docker network. This allows containers to use the same domain names
+  # that your browser uses (e.g., litellm.pluto.local instead of litellm:4000).
+  #
+  # HOW IT WORKS:
+  #   - Resolves *.pluto.local to Traefik
+  #   - Forwards all other queries to Google/Cloudflare DNS
+  #   - All containers configured to use this as their DNS server
+
+  dnsmasq:
+    image: jpillora/dnsmasq:latest
+    container_name: pluto-dnsmasq
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    networks:
+      pluto-network:
+        # Static IP so containers can reliably find the DNS server
+        ipv4_address: 172.20.0.53
+
+    volumes:
+      - ./dns/dnsmasq.conf:/etc/dnsmasq.conf:ro
+
+    # INTERNAL ONLY: DNS service for container name resolution
+    # Not exposed via Traefik - used internally by other containers
+    expose:
+      - "53/tcp"
+      - "53/udp"
+
+    cap_add:
+      - NET_ADMIN
+
+  # ============================================================================
+  # POSTGRESQL DATABASE
+  # ============================================================================
+  # PostgreSQL is a powerful, open-source database. We use it as the shared
+  # database for all our tools. It's the same database used by companies like
+  # Instagram, Spotify, and Netflix.
+  #
+  # WHY POSTGRESQL?
+  #   - Runs great in Docker containers
+  #   - AWS has "RDS for PostgreSQL" - same database in the cloud
+  #   - Azure has "Azure Database for PostgreSQL" - same database in Azure
+  #   - This means your local setup mirrors production!
+
+  postgres:
+    # The official PostgreSQL image, version 16 (latest stable as of 2024)
+    image: postgres:16-alpine
+
+    # "alpine" means a smaller image size (faster to download)
+    # Full size: ~400MB, Alpine: ~80MB - same functionality!
+
+    container_name: pluto-postgres
+
+    # Restart policy: "unless-stopped" means:
+    #   - Automatically restart if the container crashes
+    #   - Don't restart if you manually stop it
+    #   - Restart when Docker/computer restarts
+    restart: unless-stopped
+
+    # Environment variables configure PostgreSQL
+    # These are read from your .env file (see .env.example)
+    environment:
+      # The superuser password (like the master key to the database)
+      # SECURITY: No default - must be set in .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+
+      # The default database to create on first startup
+      POSTGRES_DB: ${POSTGRES_DB:-pluto}
+
+      # The superuser username
+      POSTGRES_USER: ${POSTGRES_USER:-pluto}
+
+    # Mount the volume so data persists
+    # Format: volume-name:/path/inside/container
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Init script creates separate databases for each service
+      - ./database/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+      # Connect to our shared network
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Expose port 5432 (PostgreSQL default) to your computer
+    # SECURITY: Bound to localhost only - not accessible from network
+    # Format: host-port:container-port
+    # This lets you connect with database tools like pgAdmin or DBeaver
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    # Health check: Docker will periodically check if PostgreSQL is ready
+    # This is important because other services wait for this before starting
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pluto}" ]
+      interval: 10s # Check every 10 seconds
+      timeout: 5s # Wait up to 5 seconds for response
+      retries: 5 # Try 5 times before marking unhealthy
+
+  # ============================================================================
+  # CHROMADB - VECTOR DATABASE (RAG)
+  # ============================================================================
+  # ChromaDB stores "vectors" (mathematical representations) of your documents.
+  # This allows OpenWebUI to find relevant documents when you ask questions
+  # (Retrieval Augmented Generation or RAG).
+  #
+  # We use a dedicated container instead of OpenWebUI's embedded vector store
+  # for better performance, scalability, and persistence.
+
+  chromadb:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: pluto-chromadb
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    # ChromaDB runs on port 8000
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+    volumes:
+      - chromadb-data:/chroma/chroma
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # INTERNAL ONLY: ChromaDB is accessed by other containers via Docker DNS
+    # Not exposed via Traefik - use chromadb:8000 from within the network
+    expose:
+      - "8000"
+
+  # ============================================================================
+  # LITELLM - LLM PROXY & ROUTER
+  # ============================================================================
+  # LiteLLM sits between your applications and LLM providers (like AWS Bedrock).
+  # It provides a unified API so you can:
+  #   - Use multiple LLM providers with the same code
+  #   - Track usage and costs
+  #   - Switch models without changing your applications
+  #   - Add rate limiting, caching, and more
+  #
+  # All other tools (OpenWebUI, n8n) will talk to LiteLLM, and LiteLLM
+  # will forward requests to the actual LLM (Bedrock, OpenAI, etc.)
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: pluto-litellm
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    # LiteLLM needs your AWS credentials to access Bedrock
+    environment:
+      # AWS region for Bedrock (credentials come from mounted ~/.aws)
+      AWS_REGION_NAME: ${AWS_REGION:-us-east-1}
+
+      # LiteLLM master key - used to authenticate requests to LiteLLM
+      # SECURITY: No default - must be set in .env
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?LITELLM_MASTER_KEY must be set in .env}
+
+      # Database connection for LiteLLM (usage tracking, etc.)
+      # Uses its own database to avoid conflicts with other services
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pluto}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      STORE_MODEL_IN_DB: "True"
+
+    # Mount configuration and AWS credentials
+    # BEST PRACTICE: We mount ~/.aws from your host machine instead of
+    # putting credentials in .env files. Run 'aws configure' to set these up.
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+      - ~/.aws:/root/.aws:ro # :ro = read-only for security
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.litellm.rule=Host(`litellm.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.litellm.entrypoints=websecure"
+      - "traefik.http.routers.litellm.tls=true"
+      - "traefik.http.services.litellm.loadbalancer.server.port=4000"
+
+    # Wait for PostgreSQL to be healthy before starting
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    # Command to start LiteLLM with our config file
+    command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+
+    healthcheck:
+      test: [ "CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/readiness')\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s # Give LiteLLM 60s to start before checking health
+
+  # ============================================================================
+  # OLLAMA - LOCAL MODEL SERVER
+  # ============================================================================
+  # Ollama serves local embedding and LLM models over a simple HTTP API.
+  # OpenWebUI uses this for RAG embeddings in our setup.
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: pluto-ollama
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    volumes:
+      - ollama-data:/root/.ollama
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # INTERNAL ONLY: Ollama is accessed by other containers via Docker DNS
+    # Not exposed via Traefik - use ollama:11434 from within the network
+    expose:
+      - "11434"
+
+  # ============================================================================
+  # OPEN WEBUI - CHAT INTERFACE
+  # ============================================================================
+  # Open WebUI is a beautiful, feature-rich chat interface for LLMs.
+  # Think of it like ChatGPT, but self-hosted and customizable.
+  #
+  # Features include:
+  #   - Chat with multiple models
+  #   - Save and organize conversations
+  #   - Create and share prompts
+  #   - Upload documents for context
+  #   - And much more!
+
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: pluto-openwebui
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      # Tell OpenWebUI to use LiteLLM as its LLM backend
+      # This URL is internal (container-to-container communication)
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+
+      # Disable Ollama since we're using LiteLLM for all LLM access
+      ENABLE_OLLAMA_API: "false"
+
+      # Enable OpenAI-compatible API (which LiteLLM provides)
+      ENABLE_OPENAI_API: "true"
+
+      # Ollama endpoint for embeddings
+      OLLAMA_BASE_URL: http://ollama:11434
+
+      # RAG Configuration (Retrieval Augmented Generation)
+      # Point to our dedicated ChromaDB container
+      CHROMA_HTTP_HOST: chromadb
+      CHROMA_HTTP_PORT: 8000
+      # Use local embedding model (runs inside OpenWebUI container)
+      RAG_EMBEDDING_ENGINE: "ollama" # Uses built-in sentence-transformers
+      # Ollama embedding model name
+      RAG_EMBEDDING_MODEL: "nomic-embed-text"
+
+      # Authentication settings
+      WEBUI_AUTH: "true"
+
+      # Allow signups - the FIRST user to sign up becomes admin automatically
+      ENABLE_SIGNUP: "true"
+
+      # After first admin is created, new users get 'pending' status (need approval)
+      # Change to 'user' if you want auto-approval
+      DEFAULT_USER_ROLE: pending
+
+      # Secret key for session tokens - prevents logout on container restart
+      # SECURITY: No default - must be set in .env
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?WEBUI_SECRET_KEY must be set in .env}
+
+      # Use PostgreSQL instead of SQLite for better scalability
+      # Uses its own database to avoid conflicts with other services
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pluto}:${POSTGRES_PASSWORD}@postgres:5432/openwebui
+
+    volumes:
+      - openwebui-data:/app/backend/data
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.openwebui.rule=Host(`openwebui.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.openwebui.entrypoints=websecure"
+      - "traefik.http.routers.openwebui.tls=true"
+      - "traefik.http.services.openwebui.loadbalancer.server.port=8080"
+
+    # Start after LiteLLM is started (not necessarily healthy)
+    # OpenWebUI can handle LiteLLM being temporarily unavailable
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+      ollama:
+        condition: service_started
+      litellm:
+        condition: service_started
+
+  # ============================================================================
+  # N8N - WORKFLOW AUTOMATION
+  # ============================================================================
+  # n8n is a workflow automation tool - think of it as "if this, then that"
+  # but much more powerful. You can create complex automations that:
+  #   - Trigger on events (webhooks, schedules, etc.)
+  #   - Connect to hundreds of services
+  #   - Process data with code or AI
+  #   - Build agentic AI workflows
+  #
+  # In Project Pluto, n8n represents a category of "automation tools" and
+  # demonstrates how AI agents can orchestrate complex tasks.
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: pluto-n8n
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      # Database configuration - use PostgreSQL
+      # Uses its own database to avoid conflicts with other services
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${POSTGRES_USER:-pluto}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # n8n basic auth (simple username/password protection)
+      N8N_BASIC_AUTH_ACTIVE: true
+      N8N_BASIC_AUTH_USER: ${ADMIN_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
+
+      # Webhook URL - used when n8n needs to receive external triggers
+      WEBHOOK_URL: https://n8n.${PLUTO_DOMAIN:-pluto.local}/
+
+      # Generic timezone setting
+      GENERIC_TIMEZONE: ${TIMEZONE:-America/New_York}
+      TZ: ${TIMEZONE:-America/New_York}
+
+    volumes:
+      - n8n-data:/home/node/.n8n
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n.rule=Host(`n8n.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.n8n.entrypoints=websecure"
+      - "traefik.http.routers.n8n.tls=true"
+      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ============================================================================
+  # DUCKDUCKGO SEARCH MCP SERVER
+  # ============================================================================
+  # A privacy-focused MCP (Model Context Protocol) server that provides web
+  # search capabilities to AI agents. No API key required!
+  #
+  # Features:
+  #   - DuckDuckGo web search (privacy-first, no tracking)
+  #   - URL fetching and content extraction
+  #   - Metadata extraction from URLs
+  #   - Felo AI search integration
+  #
+  # MCP allows AI agents (like those in n8n or custom apps) to use tools
+  # like web search as part of their reasoning process.
+
+  duckduckgo-mcp:
+    image: mekayelanik/duckduckgo-mcp:stable
+    container_name: pluto-ddg-mcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      # Port the MCP server listens on
+      PORT: 8020
+      # Protocol: SHTTP (Streamable HTTP) for MCP communication
+      PROTOCOL: SHTTP
+      # SECURITY: Restrict CORS to our domain only
+      CORS: "https://*.${PLUTO_DOMAIN:-pluto.local}"
+      # Timezone
+      TZ: ${TIMEZONE:-America/New_York}
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ddg.rule=Host(`ddg.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.ddg.entrypoints=websecure"
+      - "traefik.http.routers.ddg.tls=true"
+      - "traefik.http.services.ddg.loadbalancer.server.port=8020"
+
+    # Health check for the MCP server
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:8020/healthz >/dev/null 2>&1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ============================================================================
+  # MANAGEMENT TOOLS
+  # ============================================================================
+
+  # 1. Portainer - Docker Management UI
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: pluto-portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer-data:/data
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(`portainer.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls=true"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pluto-pgadmin
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@pluto.com}
+      # SECURITY: No default - must be set in .env
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD must be set in .env}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./database/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.tls=true"
+      - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
+
+    depends_on:
+      - postgres
+
+  portal:
+    image: nginx:alpine
+    container_name: pluto-portal
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+    volumes:
+      # Mount our custom portal files
+      - ./portal/html:/usr/share/nginx/html:ro
+      - ./portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    networks:
+      - pluto-network
+
+    # Use dnsmasq for DNS resolution
+    dns:
+      - 172.20.0.53 # dnsmasq container
+      - 8.8.8.8 # fallback
+
+    # Traefik routing labels
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portal.rule=Host(`${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.portal.entrypoints=websecure"
+      - "traefik.http.routers.portal.tls=true"
+      - "traefik.http.services.portal.loadbalancer.server.port=80"
+
+    # Portal should start after all other services are up
+    depends_on:
+      - openwebui
+      - n8n
+      - litellm
+      - duckduckgo-mcp
+
+# ==============================================================================
+# URLS (Domain-based routing via Traefik)
+# ==============================================================================
+#
+# After starting, you can access everything at these URLs:
+#
+#   🌐 Portal (Start Here!):  https://pluto.local
+#   💬 OpenWebUI:             https://openwebui.pluto.local
+#   🔀 LiteLLM:               https://litellm.pluto.local
+#   ⚡ n8n:                   https://n8n.pluto.local
+#   🌳 MCPJungle:             https://mcp.pluto.local
+#   🔍 DuckDuckGo MCP:        https://ddg.pluto.local
+#   🐳 Portainer:             https://portainer.pluto.local
+#   🐘 pgAdmin:               https://pgadmin.pluto.local
+#   📊 ChromaDB:              https://chromadb.pluto.local
+#   ⚙️ Traefik Dashboard:     https://traefik.pluto.local
+#   🗄️ PostgreSQL:            localhost:5432 (direct access)
+#
+# ==============================================================================

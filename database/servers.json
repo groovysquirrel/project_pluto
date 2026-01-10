@@ -1,0 +1,13 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Project Pluto DB",
+            "Group": "Servers",
+            "Host": "postgres",
+            "Port": 5432,
+            "MaintenanceDB": "postgres",
+            "Username": "pluto",
+            "SSLMode": "prefer"
+        }
+    }
+}

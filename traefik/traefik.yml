@@ -1,0 +1,49 @@
+# ==============================================================================
+# TRAEFIK - STATIC CONFIGURATION
+# ==============================================================================
+# This file configures Traefik's core behavior. Changes require restart.
+# For routing rules, we use Docker labels (dynamic, no restart needed).
+
+# Enable API and Dashboard
+api:
+  dashboard: true
+  insecure: false  # Dashboard will be behind proper routing
+
+# Healthcheck endpoint for Docker healthchecks.
+ping:
+  entryPoint: web
+
+# Entrypoints define what ports Traefik listens on
+entryPoints:
+  # HTTP - redirects to HTTPS
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  
+  # HTTPS - main entry point
+  websecure:
+    address: ":443"
+
+# Docker provider - auto-discover services via labels
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false  # Only route containers with traefik.enable=true
+    network: pluto-network
+  
+  # File provider for TLS certificates
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# Logging
+log:
+  level: INFO
+
+# Access logs (optional, uncomment for debugging)
+# accessLog:
+#   filePath: "/var/log/traefik/access.log"

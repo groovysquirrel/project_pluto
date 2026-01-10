@@ -1,0 +1,16 @@
+# ==============================================================================
+# TRAEFIK - DYNAMIC TLS CONFIGURATION
+# ==============================================================================
+# This file configures TLS certificates. Changes are picked up automatically.
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/pluto.local.crt
+      keyFile: /etc/traefik/certs/pluto.local.key
+
+  # Default certificate for all *.pluto.local domains
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /etc/traefik/certs/pluto.local.crt
+        keyFile: /etc/traefik/certs/pluto.local.key
