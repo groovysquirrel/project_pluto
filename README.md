@@ -95,24 +95,6 @@ cp .env.example .env
 
 ---
 
-## 🔧 Configuration
-
-### BrowserBase (Web Automation)
-To enable agentic browsing:
-1.  Get API keys from [browserbase.com](https://browserbase.com).
-2.  Add to `.env`:
-    ```bash
-    BROWSERBASE_API_KEY=bb_live_...
-    BROWSERBASE_PROJECT_ID=...
-    ```
-3.  **Note**: The system is pre-configured to use your local LiteLLM for intelligence (no OpenAI key needed!).
-
-### OpenWebUI Sync
-If you add models to LiteLLM (via UI or config), OpenWebUI syncs them automatically **IF** the "Model List" in OpenWebUI settings is empty.
-*   **Force Sync**: Admin Settings -> Connections -> OpenAI -> **Refresh**.
-
----
-
 ## 🛠️ Management & Maintenance
 
 ### Migration (Backup/Restore)
@@ -138,4 +120,7 @@ Stop everything. optionally delete data.
 ---
 
 ## 📚 Developed By
-Project Pluto Team - Integrating the future of local AI.
+Justin St-Maurice
+Technical Counselor
+AI Engineering and Systems Design
+Info-Tech Research Group
