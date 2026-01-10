@@ -11,11 +11,12 @@
 #   ./migrate.sh restore  -> Restores from pluto_backup.tar.gz
 # ==============================================================================
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Source shared helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/common/scripts/helpers.sh"
+
+# Load environment variables (for Docker Compose interpolation)
+load_env "${SCRIPT_DIR}/.env"
 
 BACKUP_FILE="pluto_backup.tar.gz"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -65,9 +66,13 @@ do_backup() {
 
     check_docker
 
-    # 1. Stop containers to ensure data consistency
+    # Stop containers to ensure data consistency
     echo "Stopping containers..."
-    docker compose down
+    if [ -f docker/docker-compose.yml ]; then
+        docker compose -f docker/docker-compose.yml down
+    else
+        docker compose down
+    fi
 
     # 2. Create a temporary container to mount volumes and tar them
     echo "Backing up volumes..."
@@ -121,7 +126,11 @@ do_restore() {
 
     # 1. Stop containers
     echo "Stopping containers..."
-    docker compose down
+    if [ -f docker/docker-compose.yml ]; then
+        docker compose -f docker/docker-compose.yml down
+    else
+        docker compose down
+    fi
 
     # 2. Check if volumes exist, warn user
     echo "Checking volumes..."
@@ -149,7 +158,7 @@ do_restore() {
     
     # Ensure volumes exist (create them if they don't)
     for vol in "${VOLUMES[@]}"; do
-        docker volume create pluto-${vol} >/dev/null
+        docker volume create --label com.docker.compose.project=pluto pluto-${vol} >/dev/null
     done
 
     # Mount volumes and untar

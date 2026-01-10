@@ -145,6 +145,7 @@ if [ "$DELETE_VOLUMES" = true ]; then
         "pluto-chromadb-data"
         "pluto-pgadmin-data"
         "pluto-portainer-data"
+        "pluto-ollama-data"
     )
     
     for vol in "${VOLUMES[@]}"; do

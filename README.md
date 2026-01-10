@@ -78,20 +78,22 @@ cp .env.example .env
 # Edit .env to add BrowserBase keys (optional) and customize settings
 
 # 3. Deploy
-./deploy.sh
+# 3. Deploy
+./pluto.sh deploy docker
 ```
 
 ### Access Points
 | Service | URL | Description | Credentials |
 |---------|-----|-------------|-------------|
-| **Portal** | [localhost:8080](http://localhost:8080) | **Start Here!** Unified navigation. | - |
-| **OpenWebUI** | [localhost:3001](http://localhost:3001) | Chat interface & RAG. | Auto-created (admin@pluto.local) |
-| **LiteLLM** | [localhost:4000](http://localhost:4000) | LLM Proxy API & UI. | Master Key in `.env` |
-| **n8n** | [localhost:5678](http://localhost:5678) | Workflow Automation. | `admin` / `changeme` |
-| **MCPJungle** | [localhost:8090](http://localhost:8090) | MCP Gateway. | - |
-| **Portainer** | [localhost:9000](http://localhost:9000) | Docker Management. | Set on first login |
-| **pgAdmin** | [localhost:5050](http://localhost:5050) | PostgreSQL UI. | `admin@pluto.com` / `changeme` |
-| **Chroma Admin**| [localhost:8002](http://localhost:8002) | Vector DB UI. | - |
+| **Portal** | [https://pluto.local](https://pluto.local) | **Start Here!** Unified navigation. | - |
+| **OpenWebUI** | [https://openwebui.pluto.local](https://openwebui.pluto.local) | Chat interface & RAG. | Auto-created (admin@pluto.local) |
+| **LiteLLM** | [https://litellm.pluto.local](https://litellm.pluto.local) | LLM Proxy API & UI. | Master Key in `.env` |
+| **n8n** | [https://n8n.pluto.local](https://n8n.pluto.local) | Workflow Automation. | `admin` / `changeme` |
+| **MCPJungle** | [https://mcp.pluto.local](https://mcp.pluto.local) | MCP Gateway. | - |
+| **Portainer** | [https://portainer.pluto.local](https://portainer.pluto.local) | Docker Management. | Set on first login |
+| **pgAdmin** | [https://pgadmin.pluto.local](https://pgadmin.pluto.local) | PostgreSQL UI. | `admin@pluto.com` / `changeme` |
+| **ChromaDB**| [https://chromadb.pluto.local](https://chromadb.pluto.local) | Vector DB API. | - |
+| **Traefik** | [https://traefik.pluto.local](https://traefik.pluto.local) | Routing Dashboard. | - |
 
 ---
 
@@ -111,10 +113,10 @@ Move your entire environment to a new machine or cloud server.
 Stop everything. optionally delete data.
 ```bash
 # Stop containers
-./teardown.sh
+./pluto.sh teardown docker
 
 # Stop AND delete all data (Fresh Start)
-./teardown.sh --all
+./pluto.sh teardown docker --all
 ```
 
 ---

@@ -42,6 +42,7 @@ NC='\033[0m' # No Color (reset)
 # Get the directory where this script is located
 # This ensures the script works no matter where you run it from
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$SCRIPT_DIR"
 
 # ------------------------------------------------------------------------------
@@ -272,10 +273,10 @@ print_header "STEP 2: Checking Required Files"
 # These should exist in the repository - if missing, something is wrong
 REQUIRED_FILES=(
     "docker-compose.yml"
-    ".env.example"
-    "litellm/config.yaml"
-    "portal/html/index.html"
-    "portal/nginx.conf"
+    "${REPO_ROOT}/.env.example"
+    "${REPO_ROOT}/common/litellm/config.yaml"
+    "${REPO_ROOT}/common/portal/html/index.html"
+    "${REPO_ROOT}/common/portal/nginx.conf"
     "traefik/traefik.yml"
     "traefik/dynamic/tls.yml"
 )
@@ -304,9 +305,9 @@ fi
 
 print_header "STEP 3: Setting Up Environment"
 
-# Create .env from .env.example if it doesn't exist
-if [ ! -f .env ]; then
-    cp .env.example .env
+# Create .env from .env.example if it doesn't exist (at repo root)
+if [ ! -f "${REPO_ROOT}/.env" ]; then
+    cp "${REPO_ROOT}/.env.example" "${REPO_ROOT}/.env"
     print_success "Created .env from .env.example"
     print_info "You can customize settings by editing .env"
 else
@@ -314,9 +315,9 @@ else
 fi
 
 # Load environment variables from .env
-if [ -f .env ]; then
+if [ -f "${REPO_ROOT}/.env" ]; then
     set -a
-    source .env
+    source "${REPO_ROOT}/.env"
     set +a
 fi
 
@@ -332,30 +333,30 @@ generate_secret() {
 # Check if secrets need to be generated
 SECRETS_UPDATED=false
 
-if grep -q "GENERATE_ME_WITH_OPENSSL" .env 2>/dev/null; then
+if grep -q "GENERATE_ME_WITH_OPENSSL" "${REPO_ROOT}/.env" 2>/dev/null; then
     print_info "Generating secure secrets..."
     
     # Generate WEBUI_SECRET_KEY
-    if grep -q "WEBUI_SECRET_KEY=GENERATE_ME_WITH_OPENSSL" .env; then
+    if grep -q "WEBUI_SECRET_KEY=GENERATE_ME_WITH_OPENSSL" "${REPO_ROOT}/.env"; then
         NEW_SECRET=$(generate_secret)
-        sed -i.bak "s|WEBUI_SECRET_KEY=GENERATE_ME_WITH_OPENSSL|WEBUI_SECRET_KEY=${NEW_SECRET}|g" .env
+        sed -i.bak "s|WEBUI_SECRET_KEY=GENERATE_ME_WITH_OPENSSL|WEBUI_SECRET_KEY=${NEW_SECRET}|g" "${REPO_ROOT}/.env"
         print_success "Generated WEBUI_SECRET_KEY"
         SECRETS_UPDATED=true
     fi
     
     # Generate LITELLM_MASTER_KEY (keep sk- prefix for OpenAI compatibility)
-    if grep -q "LITELLM_MASTER_KEY=sk-GENERATE_ME_WITH_OPENSSL" .env; then
+    if grep -q "LITELLM_MASTER_KEY=sk-GENERATE_ME_WITH_OPENSSL" "${REPO_ROOT}/.env"; then
         NEW_SECRET=$(generate_secret)
-        sed -i.bak "s|LITELLM_MASTER_KEY=sk-GENERATE_ME_WITH_OPENSSL|LITELLM_MASTER_KEY=sk-${NEW_SECRET}|g" .env
+        sed -i.bak "s|LITELLM_MASTER_KEY=sk-GENERATE_ME_WITH_OPENSSL|LITELLM_MASTER_KEY=sk-${NEW_SECRET}|g" "${REPO_ROOT}/.env"
         print_success "Generated LITELLM_MASTER_KEY"
         SECRETS_UPDATED=true
     fi
     
-    rm -f .env.bak
+    rm -f "${REPO_ROOT}/.env.bak"
 fi
 
 # Check if passwords need to be set
-if grep -q "CHANGE_ME_BEFORE_DEPLOY" .env 2>/dev/null; then
+if grep -q "CHANGE_ME_BEFORE_DEPLOY" "${REPO_ROOT}/.env" 2>/dev/null; then
     print_warning "⚠️  Placeholder passwords detected in .env!"
     print_info "Please edit .env and replace CHANGE_ME_BEFORE_DEPLOY with secure passwords:"
     print_info "  - POSTGRES_PASSWORD"
@@ -369,14 +370,12 @@ fi
 # Reload environment after updates
 if [ "$SECRETS_UPDATED" = true ]; then
     set -a
-    source .env
+    source "${REPO_ROOT}/.env"
     set +a
     print_info "Secrets have been generated and saved to .env"
 fi
 
-# Create directories needed for Docker volumes (if not exists)
-mkdir -p database
-print_success "Ensured database/ directory exists"
+# Note: database directory now lives in common/ and doesn't need creation
 
 # ------------------------------------------------------------------------------
 # STEP 3.5: SETUP SSL CERTIFICATES AND DNS
