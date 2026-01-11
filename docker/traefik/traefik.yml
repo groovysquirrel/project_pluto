@@ -24,9 +24,13 @@ entryPoints:
           to: websecure
           scheme: https
   
-  # HTTPS - main entry point
+  # HTTPS - main entry point for applications
   websecure:
     address: ":443"
+  
+  # Admin - separate port for admin tools (pgAdmin, Traefik dashboard)
+  admin:
+    address: ":8443"
 
 # Docker provider - auto-discover services via labels
 providers:

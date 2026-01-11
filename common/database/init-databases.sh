@@ -32,4 +32,3 @@ EOSQL
 echo "Created database: litellm"
 
 echo "All databases created successfully!"
-

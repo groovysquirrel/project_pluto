@@ -84,7 +84,7 @@ print_error() {
 
 # Domain is loaded from .env (set in Step 3), defaults to pluto.local
 # This function generates the list of all PUBLIC subdomains dynamically
-# Internal services (chromadb, ollama, dnsmasq) are NOT included as they
+# Internal services (ollama, dnsmasq) are NOT included as they
 # are only accessible within the Docker network
 get_pluto_domains() {
     local domain="${PLUTO_DOMAIN:-pluto.local}"
@@ -92,8 +92,8 @@ get_pluto_domains() {
     echo "openwebui.$domain"
     echo "n8n.$domain"
     echo "litellm.$domain"
-    echo "portainer.$domain"
     echo "pgadmin.$domain"
+    echo "qdrant.$domain"
     echo "ddg.$domain"
     echo "traefik.$domain"
 }
@@ -186,6 +186,7 @@ install_ca_to_keychain() {
 setup_hosts_file() {
     local domain="${PLUTO_DOMAIN:-pluto.local}"
     local HOSTS_MARKER="# Project Pluto domains (${domain})"
+    local HOSTS_END_MARKER="# End Project Pluto domains"
     
     # Skip for non-.local domains (assumes DNS is handled externally)
     if [[ ! "$domain" == *.local ]]; then
@@ -194,10 +195,14 @@ setup_hosts_file() {
         return 0
     fi
     
-    # Check if entries already exist
+    # Remove existing block so we can refresh entries when domains change
     if grep -q "$HOSTS_MARKER" /etc/hosts 2>/dev/null; then
-        print_info "Hosts entries already configured for ${domain}"
-        return 0
+        print_info "Refreshing hosts entries for ${domain}"
+        sudo awk -v start="$HOSTS_MARKER" -v end="$HOSTS_END_MARKER" '
+            $0 == start {skip=1; next}
+            $0 == end {skip=0; next}
+            !skip {print}
+        ' /etc/hosts | sudo tee /etc/hosts >/dev/null
     fi
     
     print_info "Adding *.${domain} domains to /etc/hosts..."
@@ -208,7 +213,7 @@ setup_hosts_file() {
     while IFS= read -r subdomain; do
         HOSTS_ENTRIES+="127.0.0.1   ${subdomain}\n"
     done < <(get_pluto_domains)
-    HOSTS_ENTRIES+="# End Project Pluto domains\n"
+    HOSTS_ENTRIES+="${HOSTS_END_MARKER}\n"
     
     # Add to /etc/hosts
     echo -e "$HOSTS_ENTRIES" | sudo tee -a /etc/hosts > /dev/null
@@ -362,6 +367,7 @@ if grep -q "CHANGE_ME_BEFORE_DEPLOY" "${REPO_ROOT}/.env" 2>/dev/null; then
     print_info "  - POSTGRES_PASSWORD"
     print_info "  - ADMIN_PASSWORD"
     print_info "  - PGADMIN_PASSWORD"
+    print_info "  - AUTHENTIK_BOOTSTRAP_PASSWORD"
     echo ""
     print_info "Or run: openssl rand -base64 16 to generate random passwords"
     print_error "Cannot continue with placeholder passwords. Please update .env and run again."
@@ -430,19 +436,55 @@ print_info "Waiting for services to initialize..."
 sleep 5
 
 # ------------------------------------------------------------------------------
-# STEP 6: CREATE OPENWEBUI ADMIN ACCOUNT
+# STEP 6: PULL OLLAMA EMBEDDING MODEL
+# ------------------------------------------------------------------------------
+# OpenWebUI uses Ollama for RAG embeddings. We need to pull the model.
+
+print_header "STEP 6: Setting Up Ollama Embedding Model"
+
+print_info "Waiting for Ollama to be ready..."
+MAX_ATTEMPTS=30
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+    if docker exec infra-ollama ollama list > /dev/null 2>&1; then
+        print_success "Ollama is ready!"
+        break
+    fi
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 2
+done
+
+if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+    print_warning "Ollama not ready after ${MAX_ATTEMPTS} attempts, skipping model pull"
+else
+    # Check if model already exists
+    if docker exec infra-ollama ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
+        print_info "nomic-embed-text model already installed"
+    else
+        print_info "Pulling nomic-embed-text model (required for RAG embeddings)..."
+        docker exec infra-ollama ollama pull nomic-embed-text
+        if [ $? -eq 0 ]; then
+            print_success "nomic-embed-text model installed"
+        else
+            print_warning "Failed to pull nomic-embed-text model. You can pull it manually with:"
+            echo "  docker exec infra-ollama ollama pull nomic-embed-text"
+        fi
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# STEP 7: CREATE OPENWEBUI ADMIN ACCOUNT (OPTIONAL)
 # ------------------------------------------------------------------------------
 # OpenWebUI doesn't support creating an admin via config files, but we can
 # automate it using their signup API. The first user to sign up automatically
 # becomes an admin.
-#
-# HOW THIS WORKS:
-#   1. We wait for OpenWebUI to be fully ready (health check)
-#   2. We check if any users already exist (skip if so)
-#   3. We create the admin account using the signup API
-#   4. The first account automatically gets admin privileges
 
-print_header "STEP 6: Setting Up OpenWebUI Admin"
+print_header "STEP 7: Setting Up OpenWebUI Admin"
+
+OPENWEBUI_BOOTSTRAP_ADMIN="${OPENWEBUI_BOOTSTRAP_ADMIN:-false}"
+if [ "${OPENWEBUI_BOOTSTRAP_ADMIN}" != "true" ]; then
+    print_info "OpenWebUI admin bootstrap disabled (OPENWEBUI_BOOTSTRAP_ADMIN=false)"
+else
 
 # Admin credentials - these come from .env (required, no defaults)
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@${PLUTO_DOMAIN:-pluto.local}}"
@@ -513,11 +555,13 @@ else
     fi
 fi
 
+fi
+
 # ------------------------------------------------------------------------------
 # STEP 8: SHOW STATUS AND ACCESS INFO
 # ------------------------------------------------------------------------------
 
-print_header "STEP 8: Deployment Complete! 🎉"
+print_header "STEP 9: Deployment Complete! 🎉"
 
 # Build domain variable for output
 DOMAIN="${PLUTO_DOMAIN:-pluto.local}"
@@ -533,10 +577,11 @@ echo -e "  🔀 LiteLLM:      ${YELLOW}https://litellm.${DOMAIN}${NC}"
 echo -e "  ⚡ n8n:          ${YELLOW}https://n8n.${DOMAIN}${NC}"
 echo -e "  🌳 MCPJungle:    ${YELLOW}https://mcp.${DOMAIN}${NC}"
 echo -e "  🔍 DuckDuckGo:   ${YELLOW}https://ddg.${DOMAIN}${NC}"
-echo -e "  📚 ChromaDB:     ${YELLOW}https://chromadb.${DOMAIN}${NC}"
-echo -e "  🛠️  Portainer:    ${YELLOW}https://portainer.${DOMAIN}${NC}"
-echo -e "  🐘 pgAdmin:      ${YELLOW}https://pgadmin.${DOMAIN}${NC}"
-echo -e "  ⚙️  Traefik:      ${YELLOW}https://traefik.${DOMAIN}${NC}"
+echo ""
+echo -e "  ${PURPLE}Admin Tools (port 8443):${NC}"
+echo -e "  🐘 pgAdmin:      ${YELLOW}https://pgadmin.${DOMAIN}:8443${NC}"
+echo -e "  📊 Qdrant:       ${YELLOW}https://qdrant.${DOMAIN}:8443${NC}"
+echo -e "  ⚙️  Traefik:      ${YELLOW}https://traefik.${DOMAIN}:8443${NC}"
 echo -e "  🗄️  PostgreSQL:   ${YELLOW}localhost:5432${NC} (local only)"
 echo ""
 echo -e "${YELLOW}⚠️  NOTE: Your browser will show a certificate warning (self-signed).${NC}"

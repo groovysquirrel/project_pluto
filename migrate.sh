@@ -3,8 +3,13 @@
 # ==============================================================================
 # PROJECT PLUTO MIGRATION SCRIPT
 # ==============================================================================
-# This script handles backing up and restoring all localized data (Docker volumes).
-# Use this to move your entire environment from local to cloud (AWS/GCP/Azure).
+# This script handles backing up and restoring Project Pluto data in a portable
+# format that works across Docker and cloud deployments.
+#
+# Backup format (pluto_backup_YYYYMMDD_HHMMSS.tar.gz):
+#   - manifest.json
+#   - postgres/*.sql (logical dumps)
+#   - volumes/* (volume contents)
 #
 # Usage:
 #   ./migrate.sh backup   -> Creates pluto_backup_[date].tar.gz
@@ -15,170 +20,337 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common/scripts/helpers.sh"
 
+REPO_ROOT="$(get_repo_root)"
+
 # Load environment variables (for Docker Compose interpolation)
-load_env "${SCRIPT_DIR}/.env"
+load_env "${REPO_ROOT}/.env"
 
 BACKUP_FILE="pluto_backup.tar.gz"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="pluto_backup_${TIMESTAMP}.tar.gz"
 
-# List of volumes to backup/restore
-VOLUMES=(
+# Volumes to include in the portable backup
+VOLUME_NAMES=(
     "openwebui-data"
     "n8n-data"
-    "chromadb-data"
-    "postgres-data"
+    "qdrant-data"
     "pgadmin-data"
     "portainer-data"
+    "ollama-data"
+    "authentik-media"
+    "authentik-templates"
+)
 
-
+# Databases to dump (shared Postgres)
+DB_NAMES=(
+    "openwebui"
+    "litellm"
+    "n8n"
+    "authentik"
 )
 
 # ------------------------------------------------------------------------------
 # HELPERS
 # ------------------------------------------------------------------------------
-print_header() {
-    echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}  $1${NC}"
-    echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-}
 
-print_success() {
-    echo -e "${GREEN}✓ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}✗ $1${NC}"
+compose() {
+    if [ -f "${REPO_ROOT}/docker/docker-compose.yml" ]; then
+        docker compose -f "${REPO_ROOT}/docker/docker-compose.yml" "$@"
+    else
+        docker compose "$@"
+    fi
 }
 
 check_docker() {
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed or not in PATH"
-        exit 1
+    require_command docker "Docker is required but not installed"
+}
+
+check_postgres_env() {
+    if [ -z "${POSTGRES_PASSWORD}" ]; then
+        print_error "POSTGRES_PASSWORD is not set. Please configure .env."
     fi
+
+    if [ -z "${POSTGRES_USER}" ]; then
+        POSTGRES_USER="pluto"
+    fi
+}
+
+wait_for_postgres() {
+    local retries=30
+    local sleep_time=2
+
+    while [ $retries -gt 0 ]; do
+        if compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' pg_isready -U '${POSTGRES_USER}'" >/dev/null 2>&1; then
+            return 0
+        fi
+        retries=$((retries - 1))
+        sleep $sleep_time
+    done
+
+    print_error "Postgres did not become ready in time."
 }
 
 # ------------------------------------------------------------------------------
 # BACKUP FUNCTION
 # ------------------------------------------------------------------------------
+
+backup_postgres() {
+    local output_dir="$1"
+    local dumped_dbs=()
+
+    print_info "Ensuring Postgres is running..."
+    compose up -d postgres
+    wait_for_postgres
+
+    mkdir -p "$output_dir"
+
+    for db in "${DB_NAMES[@]}"; do
+        local exists
+        exists=$(compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -At -c \"select 1 from pg_database where datname='${db}'\"" | tr -d '\r')
+        if [ "$exists" = "1" ]; then
+            print_info "Dumping database: ${db}"
+            compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' pg_dump -U '${POSTGRES_USER}' -d '${db}' --clean --if-exists --no-owner --no-privileges" > "${output_dir}/${db}.sql"
+            dumped_dbs+=("$db")
+        else
+            print_warning "Database not found, skipping: ${db}"
+        fi
+    done
+
+    printf '%s\n' "${dumped_dbs[@]}"
+}
+
+backup_volumes() {
+    local output_dir="$1"
+    local mount_args=""
+    local backed_up_volumes=()
+
+    for vol in "${VOLUME_NAMES[@]}"; do
+        if docker volume inspect "pluto-${vol}" >/dev/null 2>&1; then
+            mount_args+=" -v pluto-${vol}:/backup/${vol}"
+            backed_up_volumes+=("$vol")
+        else
+            print_warning "Volume not found, skipping: pluto-${vol}"
+        fi
+    done
+
+    if [ -z "$mount_args" ]; then
+        print_warning "No volumes found to back up."
+        printf '%s\n' "${backed_up_volumes[@]}"
+        return 0
+    fi
+
+    mkdir -p "$output_dir"
+
+    print_info "Copying volume data..."
+    docker run --rm $mount_args -v "${output_dir}:/host" busybox \
+        sh -c "tar -cf /host/volumes.tar -C /backup ."
+
+    tar -xf "${output_dir}/volumes.tar" -C "$output_dir"
+    rm -f "${output_dir}/volumes.tar"
+
+    printf '%s\n' "${backed_up_volumes[@]}"
+}
+
 do_backup() {
     print_header "Starting Backup: ${BACKUP_NAME}"
 
     check_docker
+    check_postgres_env
 
-    # Stop containers to ensure data consistency
-    echo "Stopping containers..."
-    if [ -f docker/docker-compose.yml ]; then
-        docker compose -f docker/docker-compose.yml down
-    else
-        docker compose down
-    fi
+    TMP_DIR=$(mktemp -d)
+    mkdir -p "${TMP_DIR}/postgres" "${TMP_DIR}/volumes"
 
-    # 2. Create a temporary container to mount volumes and tar them
-    echo "Backing up volumes..."
-    
-    # We mount each volume to /backup/volume_name
-    MOUNT_ARGS=""
-    for vol in "${VOLUMES[@]}"; do
-        MOUNT_ARGS="$MOUNT_ARGS -v pluto-${vol}:/backup/${vol}"
-    done
+    mapfile -t DUMPED_DBS < <(backup_postgres "${TMP_DIR}/postgres")
+    mapfile -t BACKED_UP_VOLUMES < <(backup_volumes "${TMP_DIR}/volumes")
 
-    # Run busybox to tar contents
-    # We tar the /backup directory contents
-    docker run --rm $MOUNT_ARGS -v $(pwd):/host busybox \
-        tar -czf /host/${BACKUP_NAME} -C /backup .
+    print_info "Writing manifest"
+    PLUTO_DUMPED_DBS="$(printf '%s\n' "${DUMPED_DBS[@]}")" \
+    PLUTO_BACKED_UP_VOLUMES="$(printf '%s\n' "${BACKED_UP_VOLUMES[@]}")" \
+    python - <<'PY' > "${TMP_DIR}/manifest.json"
+import json
+import os
+import time
 
-    if [ $? -eq 0 ]; then
-        print_success "Backup created: ${BACKUP_NAME}"
-        echo ""
-        echo "To migrate to a new server:"
-        echo "1. Copy this file to new server: scp ${BACKUP_NAME} user@host:~/"
-        echo "2. Clone this repo on the new server"
-        echo "3. Run: ./migrate.sh restore ${BACKUP_NAME}"
-    else
-        print_error "Backup failed!"
-        exit 1
-    fi
-    
-    # Optional: Restart services
+def parse_list(value):
+    if not value:
+        return []
+    return [item for item in value.split("\n") if item]
+
+manifest = {
+    "format_version": 1,
+    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "project": "pluto",
+    "postgres_dumps": parse_list(os.environ.get("PLUTO_DUMPED_DBS", "")),
+    "volumes": parse_list(os.environ.get("PLUTO_BACKED_UP_VOLUMES", "")),
+}
+
+print(json.dumps(manifest, indent=2))
+PY
+
+    tar -czf "${BACKUP_NAME}" -C "${TMP_DIR}" .
+
+    rm -rf "${TMP_DIR}"
+
+    print_success "Backup created: ${BACKUP_NAME}"
+    echo ""
+    echo "To migrate to a new server:"
+    echo "1. Copy this file to new server: scp ${BACKUP_NAME} user@host:~/"
+    echo "2. Clone this repo on the new server"
+    echo "3. Run: ./migrate.sh restore ${BACKUP_NAME}"
+
     echo ""
     read -p "Restart services now? (y/n) " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        ./deploy.sh
+        if [ -f "${REPO_ROOT}/pluto.sh" ]; then
+            "${REPO_ROOT}/pluto.sh" deploy docker
+        else
+            ./deploy.sh
+        fi
     fi
 }
 
 # ------------------------------------------------------------------------------
 # RESTORE FUNCTION
 # ------------------------------------------------------------------------------
+
+read_manifest_list() {
+    local manifest="$1"
+    local key="$2"
+
+    python - <<PY
+import json
+import sys
+
+with open("${manifest}") as handle:
+    data = json.load(handle)
+
+items = data.get("${key}", [])
+for item in items:
+    print(item)
+PY
+}
+
+restore_volumes() {
+    local volume_dir="$1"
+    shift
+    local volumes=("$@")
+
+    if [ ! -d "$volume_dir" ]; then
+        print_warning "Volume directory not found in backup: ${volume_dir}"
+        return 0
+    fi
+
+    local mount_args=""
+    for vol in "${volumes[@]}"; do
+        docker volume create --label com.docker.compose.project=pluto "pluto-${vol}" >/dev/null
+        mount_args+=" -v pluto-${vol}:/restore/${vol}"
+    done
+
+    if [ -z "$mount_args" ]; then
+        print_warning "No volumes selected for restore."
+        return 0
+    fi
+
+    print_info "Restoring volume data..."
+    docker run --rm $mount_args -v "${volume_dir}:/host/volumes:ro" busybox \
+        sh -c "mkdir -p /restore && tar -cf - -C /host/volumes . | tar -xf - -C /restore"
+}
+
+restore_postgres() {
+    local postgres_dir="$1"
+    shift
+    local dbs=("$@")
+
+    if [ ! -d "$postgres_dir" ]; then
+        print_warning "Postgres dumps not found in backup. Skipping database restore."
+        return 0
+    fi
+
+    print_info "Starting Postgres container..."
+    compose up -d postgres
+    wait_for_postgres
+
+    for db in "${dbs[@]}"; do
+        local dump_file="${postgres_dir}/${db}.sql"
+        if [ ! -f "$dump_file" ]; then
+            print_warning "Dump file missing, skipping: ${db}"
+            continue
+        fi
+
+        local exists
+        exists=$(compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -At -c \"select 1 from pg_database where datname='${db}'\"" | tr -d '\r')
+        if [ "$exists" != "1" ]; then
+            print_info "Creating database: ${db}"
+            compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' createdb -U '${POSTGRES_USER}' '${db}'"
+        fi
+
+        print_info "Restoring database: ${db}"
+        cat "$dump_file" | compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -d '${db}'"
+    done
+}
+
 do_restore() {
-    FILE_TO_RESTORE=${1:-$BACKUP_FILE}
+    local file_to_restore=${1:-$BACKUP_FILE}
+    local services_stopped=false
 
-    print_header "Starting Restore from: ${FILE_TO_RESTORE}"
+    print_header "Starting Restore from: ${file_to_restore}"
 
-    if [ ! -f "$FILE_TO_RESTORE" ]; then
-        print_error "Backup file not found: ${FILE_TO_RESTORE}"
-        exit 1
+    if [ ! -f "$file_to_restore" ]; then
+        print_error "Backup file not found: ${file_to_restore}"
     fi
 
     check_docker
+    check_postgres_env
 
-    # 1. Stop containers
-    echo "Stopping containers..."
-    if [ -f docker/docker-compose.yml ]; then
-        docker compose -f docker/docker-compose.yml down
+    TMP_DIR=$(mktemp -d)
+    tar -xzf "$file_to_restore" -C "${TMP_DIR}"
+
+    local manifest="${TMP_DIR}/manifest.json"
+    local volume_dir="${TMP_DIR}/volumes"
+    local postgres_dir="${TMP_DIR}/postgres"
+
+    local restore_volumes=("${VOLUME_NAMES[@]}")
+    local restore_dbs=("${DB_NAMES[@]}")
+
+    if [ -f "$manifest" ]; then
+        mapfile -t restore_volumes < <(read_manifest_list "$manifest" "volumes")
+        mapfile -t restore_dbs < <(read_manifest_list "$manifest" "postgres_dumps")
     else
-        docker compose down
+        print_warning "Manifest not found. Attempting legacy restore."
+        volume_dir="${TMP_DIR}"
     fi
 
-    # 2. Check if volumes exist, warn user
-    echo "Checking volumes..."
-    EXISTING_DATA=false
-    for vol in "${VOLUMES[@]}"; do
-        if docker volume inspect pluto-${vol} >/dev/null 2>&1; then
-            EXISTING_DATA=true
-            break
+    if [ ${#restore_volumes[@]} -gt 0 ]; then
+        if [ "$services_stopped" = false ]; then
+            print_info "Stopping containers..."
+            compose down
+            services_stopped=true
         fi
-    done
 
-    if [ "$EXISTING_DATA" = true ]; then
-        echo -e "${RED}WARNING: Existing data volumes found!${NC}"
-        echo "Restoring will OVERWRITE existing data."
-        read -p "Are you sure you want to continue? (y/N) " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Restore cancelled."
-            exit 1
-        fi
-    fi
-
-    # 3. Restore data
-    echo "Restoring volumes..."
-    
-    # Ensure volumes exist (create them if they don't)
-    for vol in "${VOLUMES[@]}"; do
-        docker volume create --label com.docker.compose.project=pluto pluto-${vol} >/dev/null
-    done
-
-    # Mount volumes and untar
-    MOUNT_ARGS=""
-    for vol in "${VOLUMES[@]}"; do
-        MOUNT_ARGS="$MOUNT_ARGS -v pluto-${vol}:/backup/${vol}"
-    done
-
-    # Run busybox to untar
-    docker run --rm $MOUNT_ARGS -v $(pwd):/host busybox \
-        tar -xzf /host/${FILE_TO_RESTORE} -C /backup
-
-    if [ $? -eq 0 ]; then
-        print_success "Restore complete!"
-        echo ""
-        echo "You can now run ./deploy.sh to start services with restored data."
+        print_info "Restoring volume data..."
+        restore_volumes "$volume_dir" "${restore_volumes[@]}"
     else
-        print_error "Restore failed!"
-        exit 1
+        print_warning "No volumes found to restore."
     fi
+
+    if [ ${#restore_dbs[@]} -gt 0 ]; then
+        if [ "$services_stopped" = false ]; then
+            print_info "Stopping containers..."
+            compose down
+            services_stopped=true
+        fi
+
+        restore_postgres "$postgres_dir" "${restore_dbs[@]}"
+    else
+        print_warning "No database dumps found to restore."
+    fi
+
+    rm -rf "${TMP_DIR}"
+
+    print_success "Restore complete!"
+    echo ""
+    echo "You can now run ./pluto.sh deploy docker to start services with restored data."
 }
 
 # ------------------------------------------------------------------------------

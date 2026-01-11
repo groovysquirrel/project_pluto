@@ -1,0 +1,32 @@
+http:
+  routers:
+    openwebui:
+      rule: "Host(`openwebui.__PLUTO_DOMAIN__`)"
+      service: openwebui
+    litellm:
+      rule: "Host(`litellm.__PLUTO_DOMAIN__`)"
+      service: litellm
+    chromadb:
+      rule: "Host(`chromadb.__PLUTO_DOMAIN__`)"
+      service: chromadb
+    ollama:
+      rule: "Host(`ollama.__PLUTO_DOMAIN__`)"
+      service: ollama
+
+  services:
+    openwebui:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8080"
+    litellm:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:4000"
+    chromadb:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:8000"
+    ollama:
+      loadBalancer:
+        servers:
+          - url: "http://127.0.0.1:11434"

@@ -70,17 +70,14 @@ volumes:
   n8n-data:
     name: pluto-n8n-data
 
-  # ChromaDB storage - RAG vectors
-  chromadb-data:
-    name: pluto-chromadb-data
+  # Qdrant storage - RAG vectors
+  qdrant-data:
+    name: pluto-qdrant-data
 
   # Ollama storage - local models and cache
   ollama-data:
     name: pluto-ollama-data
 
-  # Management tools storage
-  portainer-data:
-    name: pluto-portainer-data
   pgadmin-data:
     name: pluto-pgadmin-data
 
@@ -106,7 +103,7 @@ services:
 
   traefik:
     image: traefik:v2.11
-    container_name: pluto-traefik
+    container_name: edge-traefik
     restart: unless-stopped
 
     # Security: no new privileges
@@ -114,7 +111,9 @@ services:
       - no-new-privileges:true
 
     networks:
-      - pluto-network
+      pluto-network:
+        # Static IP so dnsmasq can reliably resolve *.pluto.local
+        ipv4_address: 172.20.0.10
 
     # Use dnsmasq for DNS resolution
     dns:
@@ -125,7 +124,8 @@ services:
 
     ports:
       - "80:80" # HTTP (redirects to HTTPS)
-      - "443:443" # HTTPS
+      - "443:443" # HTTPS (applications)
+      - "8443:8443" # Admin tools (pgAdmin, Traefik dashboard)
 
     volumes:
       # Docker socket for auto-discovery (read-only)
@@ -137,12 +137,12 @@ services:
       # Certificates
       - ./traefik/certs:/etc/traefik/certs:ro
 
-    # Labels for Traefik's own dashboard
+    # Labels for Traefik's own dashboard (admin port)
     labels:
       - "traefik.enable=true"
-      # Dashboard routing
+      # Dashboard routing on admin port
       - "traefik.http.routers.traefik.rule=Host(`traefik.${PLUTO_DOMAIN:-pluto.local}`)"
-      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.entrypoints=admin"
       - "traefik.http.routers.traefik.tls=true"
       - "traefik.http.routers.traefik.service=api@internal"
 
@@ -168,7 +168,7 @@ services:
     image: jpillora/dnsmasq:latest
     # Enable AMD64 emulation for Apple Silicon Macs (image has no ARM build)
     platform: linux/amd64
-    container_name: pluto-dnsmasq
+    container_name: infra-dnsmasq
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -210,7 +210,7 @@ services:
     # "alpine" means a smaller image size (faster to download)
     # Full size: ~400MB, Alpine: ~80MB - same functionality!
 
-    container_name: pluto-postgres
+    container_name: infra-postgres
 
     # Restart policy: "unless-stopped" means:
     #   - Automatically restart if the container crashes
@@ -261,30 +261,27 @@ services:
       timeout: 5s # Wait up to 5 seconds for response
       retries: 5 # Try 5 times before marking unhealthy
 
+  # QDRANT - VECTOR DATABASE (RAG)
   # ============================================================================
-  # CHROMADB - VECTOR DATABASE (RAG)
-  # ============================================================================
-  # ChromaDB stores "vectors" (mathematical representations) of your documents.
+  # Qdrant stores "vectors" (mathematical representations) of your documents.
   # This allows OpenWebUI to find relevant documents when you ask questions
   # (Retrieval Augmented Generation or RAG).
   #
-  # We use a dedicated container instead of OpenWebUI's embedded vector store
-  # for better performance, scalability, and persistence.
+  # Qdrant has a built-in web dashboard at its HTTP port for easy management.
 
-  chromadb:
-    image: ghcr.io/chroma-core/chroma:latest
-    container_name: pluto-chromadb
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: infra-qdrant
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
 
-    # ChromaDB runs on port 8000
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      # API key for authentication
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-pluto-qdrant-key}
 
     volumes:
-      - chromadb-data:/chroma/chroma
+      - qdrant-data:/qdrant/storage
 
     networks:
       - pluto-network
@@ -294,10 +291,18 @@ services:
       - 172.20.0.53 # dnsmasq container
       - 8.8.8.8 # fallback
 
-    # INTERNAL ONLY: ChromaDB is accessed by other containers via Docker DNS
-    # Not exposed via Traefik - use chromadb:8000 from within the network
+    # Traefik routing labels (admin port) - Qdrant's built-in dashboard
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qdrant.rule=Host(`qdrant.${PLUTO_DOMAIN:-pluto.local}`)"
+      - "traefik.http.routers.qdrant.entrypoints=admin"
+      - "traefik.http.routers.qdrant.tls=true"
+      - "traefik.http.services.qdrant.loadbalancer.server.port=6333"
+
+    # Expose internally for OpenWebUI
     expose:
-      - "8000"
+      - "6333" # HTTP API + Dashboard
+      - "6334" # gRPC
 
   # ============================================================================
   # LITELLM - LLM PROXY & ROUTER
@@ -314,7 +319,7 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    container_name: pluto-litellm
+    container_name: app-litellm
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -332,6 +337,9 @@ services:
       # Uses its own database to avoid conflicts with other services
       DATABASE_URL: postgresql://${POSTGRES_USER:-pluto}:${POSTGRES_PASSWORD}@postgres:5432/litellm
       STORE_MODEL_IN_DB: "True"
+
+      # UI Configuration
+      PROXY_BASE_URL: https://litellm.${PLUTO_DOMAIN:-pluto.local}
 
     # Mount configuration and AWS credentials
     # BEST PRACTICE: We mount ~/.aws from your host machine instead of
@@ -379,7 +387,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: pluto-ollama
+    container_name: infra-ollama
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -415,7 +423,7 @@ services:
 
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
-    container_name: pluto-openwebui
+    container_name: app-openwebui
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -436,9 +444,10 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
 
       # RAG Configuration (Retrieval Augmented Generation)
-      # Point to our dedicated ChromaDB container
-      CHROMA_HTTP_HOST: chromadb
-      CHROMA_HTTP_PORT: 8000
+      # Point to our dedicated Qdrant container
+      VECTOR_DB: qdrant
+      QDRANT_URI: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-pluto-qdrant-key}
       # Use local embedding model (runs inside OpenWebUI container)
       RAG_EMBEDDING_ENGINE: "ollama" # Uses built-in sentence-transformers
       # Ollama embedding model name
@@ -486,7 +495,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      chromadb:
+      qdrant:
         condition: service_started
       ollama:
         condition: service_started
@@ -508,7 +517,7 @@ services:
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
-    container_name: pluto-n8n
+    container_name: app-n8n
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -524,7 +533,7 @@ services:
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
 
       # n8n basic auth (simple username/password protection)
-      N8N_BASIC_AUTH_ACTIVE: true
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-false}
       N8N_BASIC_AUTH_USER: ${ADMIN_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
 
@@ -535,8 +544,12 @@ services:
       GENERIC_TIMEZONE: ${TIMEZONE:-America/New_York}
       TZ: ${TIMEZONE:-America/New_York}
 
+      # Trust the self-signed Project Pluto CA for HTTPS calls (LiteLLM, etc.)
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/pluto-ca.crt
+
     volumes:
       - n8n-data:/home/node/.n8n
+      - ./traefik/certs/pluto-ca.crt:/etc/ssl/certs/pluto-ca.crt:ro
 
     networks:
       - pluto-network
@@ -575,7 +588,7 @@ services:
 
   duckduckgo-mcp:
     image: mekayelanik/duckduckgo-mcp:stable
-    container_name: pluto-ddg-mcp
+    container_name: mcp-ddg
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -618,35 +631,9 @@ services:
   # MANAGEMENT TOOLS
   # ============================================================================
 
-  # 1. Portainer - Docker Management UI
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: pluto-portainer
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - portainer-data:/data
-    networks:
-      - pluto-network
-
-    # Use dnsmasq for DNS resolution
-    dns:
-      - 172.20.0.53 # dnsmasq container
-      - 8.8.8.8 # fallback
-
-    # Traefik routing labels
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.portainer.rule=Host(`portainer.${PLUTO_DOMAIN:-pluto.local}`)"
-      - "traefik.http.routers.portainer.entrypoints=websecure"
-      - "traefik.http.routers.portainer.tls=true"
-      - "traefik.http.services.portainer.loadbalancer.server.port=9000"
-
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: pluto-pgadmin
+    container_name: admin-pgadmin
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -655,6 +642,8 @@ services:
       # SECURITY: No default - must be set in .env
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD must be set in .env}
       PGADMIN_CONFIG_SERVER_MODE: "False"
+      # Must be a valid Python list literal, e.g. '["local"]' or '[]'
+      PGADMIN_CONFIG_ALLOW_SPECIAL_EMAIL_DOMAINS: ${PGADMIN_ALLOW_SPECIAL_EMAIL_DOMAINS:-"[]"}
     volumes:
       - pgadmin-data:/var/lib/pgadmin
       - ../common/database/servers.json:/pgadmin4/servers.json:ro
@@ -666,11 +655,11 @@ services:
       - 172.20.0.53 # dnsmasq container
       - 8.8.8.8 # fallback
 
-    # Traefik routing labels
+    # Traefik routing labels (admin port)
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.pgadmin.rule=Host(`pgadmin.${PLUTO_DOMAIN:-pluto.local}`)"
-      - "traefik.http.routers.pgadmin.entrypoints=websecure"
+      - "traefik.http.routers.pgadmin.entrypoints=admin"
       - "traefik.http.routers.pgadmin.tls=true"
       - "traefik.http.services.pgadmin.loadbalancer.server.port=80"
 
@@ -679,7 +668,7 @@ services:
 
   portal:
     image: nginx:alpine
-    container_name: pluto-portal
+    container_name: app-portal
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -724,9 +713,8 @@ services:
 #   ⚡ n8n:                   https://n8n.pluto.local
 #   🌳 MCPJungle:             https://mcp.pluto.local
 #   🔍 DuckDuckGo MCP:        https://ddg.pluto.local
-#   🐳 Portainer:             https://portainer.pluto.local
 #   🐘 pgAdmin:               https://pgadmin.pluto.local
-#   📊 ChromaDB:              https://chromadb.pluto.local
+#   📊 Qdrant:                https://qdrant.pluto.local:8443
 #   ⚙️ Traefik Dashboard:     https://traefik.pluto.local
 #   🗄️ PostgreSQL:            localhost:5432 (direct access)
 #

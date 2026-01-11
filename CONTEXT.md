@@ -7,7 +7,7 @@ Project Pluto is a local, containerized AI development stack orchestrating multi
 *   **LLM Provider**: AWS Bedrock (via LiteLLM proxy).
 *   **Frontend**: OpenWebUI (Chat) and a custom Nginx Portal (Navigation).
 *   **Automation**: n8n (Workflows) with Postgres persistence.
-*   **Vector DB**: ChromaDB (RAG).
+*   **Vector DB**: Qdrant (RAG).
 *   **Agents (MCP)**: MCPJungle gateway connecting to DuckDuckGo and BrowserBase servers.
 *   **Reverse Proxy**: Traefik for domain-based routing and HTTPS.
 *   **DNS Server**: dnsmasq for internal `*.pluto.local` resolution.
@@ -27,7 +27,7 @@ Project Pluto is a local, containerized AI development stack orchestrating multi
 | **LiteLLM** | `litellm.pluto.local` | 4000 | OpenAI-compatible Proxy for Bedrock. |
 | **OpenWebUI** | `openwebui.pluto.local` | 8080 | Chat Interface & RAG Client. |
 | **n8n** | `n8n.pluto.local` | 5678 | Workflow Automation. |
-| **ChromaDB** | `chromadb.pluto.local` | 8000 | Vector Store. |
+| **Qdrant** | `qdrant.pluto.local:8443` | 6333 | Vector Store (HTTP API + UI via Traefik admin port). |
 | **MCPJungle** | `mcp.pluto.local` | 8080 | MCP Gateway. |
 | **DuckDuckGo MCP** | `ddg.pluto.local` | 8020 | Web search MCP server. |
 | **Portainer** | `portainer.pluto.local` | 9000 | Container Management. |
@@ -52,4 +52,3 @@ Project Pluto is a local, containerized AI development stack orchestrating multi
 *   **Master Key**: `sk-pluto-master-key` (Default) or defined in `.env`.
 *   **LiteLLM URL**: `https://litellm.pluto.local` (External) or `http://litellm:4000` (Internal).
 *   **Portal URL**: `https://pluto.local`
-

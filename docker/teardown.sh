@@ -29,7 +29,21 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$SCRIPT_DIR"
+
+compose() {
+    local env_file="${REPO_ROOT}/.env"
+    if [ -f "${SCRIPT_DIR}/docker-compose.yml" ]; then
+        if [ -f "$env_file" ]; then
+            docker compose --env-file "$env_file" -f "${SCRIPT_DIR}/docker-compose.yml" "$@"
+        else
+            docker compose -f "${SCRIPT_DIR}/docker-compose.yml" "$@"
+        fi
+    else
+        docker compose "$@"
+    fi
+}
 
 # ------------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -125,9 +139,9 @@ fi
 print_header "Stopping Services"
 
 # Check if any containers are running
-if docker compose ps --quiet 2>/dev/null | grep -q .; then
+if compose ps --quiet 2>/dev/null | grep -q .; then
     print_info "Stopping all containers..."
-    docker compose down
+    compose down
     print_success "All containers stopped"
 else
     print_info "No running containers found"
@@ -142,10 +156,12 @@ if [ "$DELETE_VOLUMES" = true ]; then
         "pluto-postgres-data"
         "pluto-openwebui-data"
         "pluto-n8n-data"
-        "pluto-chromadb-data"
+        "pluto-qdrant-data"
         "pluto-pgadmin-data"
         "pluto-portainer-data"
         "pluto-ollama-data"
+        "pluto-authentik-media"
+        "pluto-authentik-templates"
     )
     
     for vol in "${VOLUMES[@]}"; do
