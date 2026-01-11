@@ -711,11 +711,12 @@ services:
 #   💬 OpenWebUI:             https://openwebui.pluto.local
 #   🔀 LiteLLM:               https://litellm.pluto.local
 #   ⚡ n8n:                   https://n8n.pluto.local
-#   🌳 MCPJungle:             https://mcp.pluto.local
 #   🔍 DuckDuckGo MCP:        https://ddg.pluto.local
-#   🐘 pgAdmin:               https://pgadmin.pluto.local
+#
+#   Admin Tools (port 8443):
+#   🐘 pgAdmin:               https://pgadmin.pluto.local:8443
 #   📊 Qdrant:                https://qdrant.pluto.local:8443
-#   ⚙️ Traefik Dashboard:     https://traefik.pluto.local
-#   🗄️ PostgreSQL:            localhost:5432 (direct access)
+#   ⚙️ Traefik Dashboard:     https://traefik.pluto.local:8443
+#   🗄️ PostgreSQL:            localhost:5432 (direct access, local only)
 #
 # ==============================================================================

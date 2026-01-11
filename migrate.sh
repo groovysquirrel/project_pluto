@@ -35,10 +35,7 @@ VOLUME_NAMES=(
     "n8n-data"
     "qdrant-data"
     "pgadmin-data"
-    "portainer-data"
     "ollama-data"
-    "authentik-media"
-    "authentik-templates"
 )
 
 # Databases to dump (shared Postgres)
@@ -46,7 +43,6 @@ DB_NAMES=(
     "openwebui"
     "litellm"
     "n8n"
-    "authentik"
 )
 
 # ------------------------------------------------------------------------------
@@ -160,13 +156,21 @@ do_backup() {
     TMP_DIR=$(mktemp -d)
     mkdir -p "${TMP_DIR}/postgres" "${TMP_DIR}/volumes"
 
-    mapfile -t DUMPED_DBS < <(backup_postgres "${TMP_DIR}/postgres")
-    mapfile -t BACKED_UP_VOLUMES < <(backup_volumes "${TMP_DIR}/volumes")
+    # macOS-compatible alternative to mapfile
+    DUMPED_DBS=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && DUMPED_DBS+=("$line")
+    done < <(backup_postgres "${TMP_DIR}/postgres")
+
+    BACKED_UP_VOLUMES=()
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && BACKED_UP_VOLUMES+=("$line")
+    done < <(backup_volumes "${TMP_DIR}/volumes")
 
     print_info "Writing manifest"
     PLUTO_DUMPED_DBS="$(printf '%s\n' "${DUMPED_DBS[@]}")" \
     PLUTO_BACKED_UP_VOLUMES="$(printf '%s\n' "${BACKED_UP_VOLUMES[@]}")" \
-    python - <<'PY' > "${TMP_DIR}/manifest.json"
+    python3 - <<'PY' > "${TMP_DIR}/manifest.json"
 import json
 import os
 import time
@@ -196,18 +200,7 @@ PY
     echo "To migrate to a new server:"
     echo "1. Copy this file to new server: scp ${BACKUP_NAME} user@host:~/"
     echo "2. Clone this repo on the new server"
-    echo "3. Run: ./migrate.sh restore ${BACKUP_NAME}"
-
-    echo ""
-    read -p "Restart services now? (y/n) " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [ -f "${REPO_ROOT}/pluto.sh" ]; then
-            "${REPO_ROOT}/pluto.sh" deploy docker
-        else
-            ./deploy.sh
-        fi
-    fi
+    echo "3. Run: ./pluto.sh restore docker ${BACKUP_NAME}"
 }
 
 # ------------------------------------------------------------------------------
@@ -218,7 +211,7 @@ read_manifest_list() {
     local manifest="$1"
     local key="$2"
 
-    python - <<PY
+    python3 - <<PY
 import json
 import sys
 
@@ -278,15 +271,20 @@ restore_postgres() {
             continue
         fi
 
+        # Check if database exists
         local exists
-        exists=$(compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -At -c \"select 1 from pg_database where datname='${db}'\"" | tr -d '\r')
+        exists=$(docker exec infra-postgres psql -U "${POSTGRES_USER}" -At -c "SELECT 1 FROM pg_database WHERE datname='${db}'" 2>/dev/null | tr -d '\r')
         if [ "$exists" != "1" ]; then
             print_info "Creating database: ${db}"
-            compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' createdb -U '${POSTGRES_USER}' '${db}'"
+            docker exec infra-postgres createdb -U "${POSTGRES_USER}" "${db}"
         fi
 
         print_info "Restoring database: ${db}"
-        cat "$dump_file" | compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -d '${db}'"
+        # Copy dump file into container and restore using psql -f
+        # This avoids shell escaping issues with piped stdin
+        docker cp "$dump_file" "infra-postgres:/tmp/${db}.sql"
+        docker exec infra-postgres psql -U "${POSTGRES_USER}" -d "${db}" -f "/tmp/${db}.sql"
+        docker exec infra-postgres rm -f "/tmp/${db}.sql"
     done
 }
 
@@ -314,8 +312,15 @@ do_restore() {
     local restore_dbs=("${DB_NAMES[@]}")
 
     if [ -f "$manifest" ]; then
-        mapfile -t restore_volumes < <(read_manifest_list "$manifest" "volumes")
-        mapfile -t restore_dbs < <(read_manifest_list "$manifest" "postgres_dumps")
+        restore_volumes=()
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && restore_volumes+=("$line")
+        done < <(read_manifest_list "$manifest" "volumes")
+
+        restore_dbs=()
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && restore_dbs+=("$line")
+        done < <(read_manifest_list "$manifest" "postgres_dumps")
     else
         print_warning "Manifest not found. Attempting legacy restore."
         volume_dir="${TMP_DIR}"

@@ -6,11 +6,14 @@
 # This script routes deployment commands to the appropriate environment.
 #
 # USAGE:
-#   ./pluto.sh deploy docker     # Deploy locally with Docker Compose
-#   ./pluto.sh teardown docker   # Tear down local Docker deployment
-#   ./pluto.sh deploy aws        # Deploy to AWS (future)
-#   ./pluto.sh deploy azure      # Deploy to Azure (future)
-#   ./pluto.sh deploy gcp        # Deploy to GCP (future)
+#   ./pluto.sh deploy docker            # Deploy locally with Docker Compose
+#   ./pluto.sh teardown docker          # Tear down local Docker deployment
+#   ./pluto.sh backup docker            # Create a data backup
+#   ./pluto.sh restore docker [file]    # Restore from backup and deploy
+#
+#   ./pluto.sh deploy aws               # Deploy to AWS (future)
+#   ./pluto.sh deploy azure             # Deploy to Azure (future)
+#   ./pluto.sh deploy gcp               # Deploy to GCP (future)
 #
 # ==============================================================================
 
@@ -39,6 +42,8 @@ show_help() {
     echo "Actions:"
     echo "  deploy     Deploy Project Pluto"
     echo "  teardown   Tear down Project Pluto"
+    echo "  backup     Create a backup of all data"
+    echo "  restore    Restore from a backup file"
     echo ""
     echo "Environments:"
     echo "  docker     Local Docker Compose deployment"
@@ -47,9 +52,11 @@ show_help() {
     echo "  gcp        GCP Cloud Run deployment (coming soon)"
     echo ""
     echo "Examples:"
-    echo "  ./pluto.sh deploy docker       # Start local environment"
-    echo "  ./pluto.sh teardown docker     # Stop local environment"
-    echo "  ./pluto.sh teardown docker --all  # Stop and delete all data"
+    echo "  ./pluto.sh deploy docker              # Start local environment"
+    echo "  ./pluto.sh teardown docker            # Stop local environment"
+    echo "  ./pluto.sh teardown docker --all      # Stop and delete all data"
+    echo "  ./pluto.sh backup docker              # Create backup archive"
+    echo "  ./pluto.sh restore docker backup.tar.gz  # Restore and deploy"
     echo ""
 }
 
@@ -76,9 +83,21 @@ case "$TARGET" in
             teardown)
                 exec "$SCRIPT_DIR/docker/teardown.sh" "$@"
                 ;;
+            backup)
+                exec "$SCRIPT_DIR/migrate.sh" backup "$@"
+                ;;
+            restore)
+                # Restore data, then deploy
+                BACKUP_FILE="${1:-base_install.tar.gz}"
+                shift 2>/dev/null || true
+                "$SCRIPT_DIR/migrate.sh" restore "$BACKUP_FILE"
+                echo ""
+                echo -e "${CYAN}Starting services with restored data...${NC}"
+                exec "$SCRIPT_DIR/docker/deploy.sh" "$@"
+                ;;
             *)
                 echo -e "${RED}Unknown action: $ACTION${NC}"
-                echo "Valid actions: deploy, teardown"
+                echo "Valid actions: deploy, teardown, backup, restore"
                 exit 1
                 ;;
         esac
