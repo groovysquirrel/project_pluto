@@ -40,16 +40,15 @@ locals {
   service_hosts = {
     openwebui = "openwebui.${local.domain_root}"
     litellm   = "litellm.${local.domain_root}"
-    chromadb  = "chromadb.${local.domain_root}"
-    ollama    = "ollama.${local.domain_root}"
+    n8n       = "n8n.${local.domain_root}"
+    ddg       = "ddg.${local.domain_root}"
   }
 
   ecr_repos = {
     traefik   = "${var.project_name}-traefik"
     openwebui = "${var.project_name}-openwebui"
     litellm   = "${var.project_name}-litellm"
-    chromadb  = "${var.project_name}-chromadb"
-    ollama    = "${var.project_name}-ollama"
+    n8n       = "${var.project_name}-n8n"
   }
 }
 
@@ -262,40 +261,6 @@ resource "aws_efs_access_point" "openwebui" {
   }
 }
 
-resource "aws_efs_access_point" "chromadb" {
-  file_system_id = aws_efs_file_system.pluto.id
-
-  root_directory {
-    path = "/chromadb"
-    creation_info {
-      owner_uid   = 1000
-      owner_gid   = 1000
-      permissions = "0755"
-    }
-  }
-
-  tags = {
-    Name = "${var.project_name}-chromadb"
-  }
-}
-
-resource "aws_efs_access_point" "ollama" {
-  file_system_id = aws_efs_file_system.pluto.id
-
-  root_directory {
-    path = "/ollama"
-    creation_info {
-      owner_uid   = 1000
-      owner_gid   = 1000
-      permissions = "0755"
-    }
-  }
-
-  tags = {
-    Name = "${var.project_name}-ollama"
-  }
-}
-
 # -----------------------------------------------------------------------------
 # RDS
 # -----------------------------------------------------------------------------
@@ -332,6 +297,68 @@ resource "aws_db_instance" "pluto" {
   tags = {
     Name = "${var.project_name}-postgres"
   }
+}
+
+# -----------------------------------------------------------------------------
+# OPENSEARCH SERVERLESS (Vector Search)
+# -----------------------------------------------------------------------------
+
+resource "aws_opensearchserverless_security_policy" "encryption" {
+  name   = "${var.project_name}-encryption"
+  type   = "encryption"
+  policy = jsonencode({
+    Rules = [{
+      ResourceType = "collection"
+      Resource     = ["collection/${var.project_name}-vectors"]
+    }]
+    AWSOwnedKey = true
+  })
+}
+
+resource "aws_opensearchserverless_security_policy" "network" {
+  name   = "${var.project_name}-network"
+  type   = "network"
+  policy = jsonencode([{
+    Rules = [{
+      ResourceType = "collection"
+      Resource     = ["collection/${var.project_name}-vectors"]
+    }, {
+      ResourceType = "dashboard"
+      Resource     = ["collection/${var.project_name}-vectors"]
+    }]
+    AllowFromPublic = true
+  }])
+}
+
+resource "aws_opensearchserverless_collection" "pluto" {
+  name = "${var.project_name}-vectors"
+  type = "VECTORSEARCH"
+
+  depends_on = [
+    aws_opensearchserverless_security_policy.encryption,
+    aws_opensearchserverless_security_policy.network
+  ]
+
+  tags = {
+    Name = "${var.project_name}-vectors"
+  }
+}
+
+resource "aws_opensearchserverless_access_policy" "data" {
+  name   = "${var.project_name}-data"
+  type   = "data"
+  policy = jsonencode([{
+    Rules = [{
+      ResourceType = "index"
+      Resource     = ["index/${var.project_name}-vectors/*"]
+      Permission   = ["aoss:*"]
+    }, {
+      ResourceType = "collection"
+      Resource     = ["collection/${var.project_name}-vectors"]
+      Permission   = ["aoss:*"]
+    }]
+    Principal = [aws_iam_role.ecs_task.arn]
+  }])
 }
 
 # -----------------------------------------------------------------------------
@@ -382,6 +409,15 @@ resource "aws_secretsmanager_secret" "litellm_database_url" {
 resource "aws_secretsmanager_secret_version" "litellm_database_url" {
   secret_id = aws_secretsmanager_secret.litellm_database_url.id
   secret_string = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.pluto.address}:5432/${var.db_name}"
+}
+
+resource "aws_secretsmanager_secret" "db_password" {
+  name = "${var.project_name}/db_password"
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_string = random_password.db_password.result
 }
 
 # -----------------------------------------------------------------------------
@@ -437,6 +473,29 @@ resource "aws_iam_role_policy_attachment" "ecs_task_bedrock" {
   policy_arn = aws_iam_policy.bedrock.arn
 }
 
+resource "aws_iam_policy" "opensearch" {
+  name        = "${var.project_name}-opensearch"
+  description = "Allow OpenWebUI to access OpenSearch Serverless"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "aoss:APIAccessAll"
+        ]
+        Resource = aws_opensearchserverless_collection.pluto.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_opensearch" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.opensearch.arn
+}
+
 resource "aws_ecs_task_definition" "pluto" {
   family                   = "${var.project_name}-task"
   requires_compatibilities = ["FARGATE"]
@@ -455,34 +514,6 @@ resource "aws_ecs_task_definition" "pluto" {
       root_directory          = "/"
       authorization_config {
         access_point_id = aws_efs_access_point.openwebui.id
-        iam             = "ENABLED"
-      }
-    }
-  }
-
-  volume {
-    name = "chromadb-data"
-
-    efs_volume_configuration {
-      file_system_id          = aws_efs_file_system.pluto.id
-      transit_encryption      = "ENABLED"
-      root_directory          = "/"
-      authorization_config {
-        access_point_id = aws_efs_access_point.chromadb.id
-        iam             = "ENABLED"
-      }
-    }
-  }
-
-  volume {
-    name = "ollama-data"
-
-    efs_volume_configuration {
-      file_system_id          = aws_efs_file_system.pluto.id
-      transit_encryption      = "ENABLED"
-      root_directory          = "/"
-      authorization_config {
-        access_point_id = aws_efs_access_point.ollama.id
         iam             = "ENABLED"
       }
     }
@@ -548,30 +579,53 @@ resource "aws_ecs_task_definition" "pluto" {
       }
     },
     {
-      name      = "chromadb"
-      image     = "${aws_ecr_repository.pluto["chromadb"].repository_url}:${var.image_tag}"
+      name      = "n8n"
+      image     = "${aws_ecr_repository.pluto["n8n"].repository_url}:${var.image_tag}"
       essential = true
       portMappings = [
         {
-          containerPort = 8000
+          containerPort = 5678
           protocol      = "tcp"
         }
       ]
       environment = [
         {
-          name  = "IS_PERSISTENT"
-          value = "TRUE"
+          name  = "DB_TYPE"
+          value = "postgresdb"
         },
         {
-          name  = "ANONYMIZED_TELEMETRY"
-          value = "FALSE"
+          name  = "DB_POSTGRESDB_HOST"
+          value = aws_db_instance.pluto.address
+        },
+        {
+          name  = "DB_POSTGRESDB_PORT"
+          value = "5432"
+        },
+        {
+          name  = "DB_POSTGRESDB_DATABASE"
+          value = "n8n"
+        },
+        {
+          name  = "DB_POSTGRESDB_USER"
+          value = var.db_username
+        },
+        {
+          name  = "WEBHOOK_URL"
+          value = "https://n8n.${local.domain_root}/"
+        },
+        {
+          name  = "GENERIC_TIMEZONE"
+          value = "America/New_York"
+        },
+        {
+          name  = "TZ"
+          value = "America/New_York"
         }
       ]
-      mountPoints = [
+      secrets = [
         {
-          sourceVolume  = "chromadb-data"
-          containerPath = "/chroma/chroma"
-          readOnly      = false
+          name      = "DB_POSTGRESDB_PASSWORD"
+          valueFrom = aws_secretsmanager_secret.db_password.arn
         }
       ]
       logConfiguration = {
@@ -579,33 +633,7 @@ resource "aws_ecs_task_definition" "pluto" {
         options = {
           awslogs-group         = aws_cloudwatch_log_group.pluto.name
           awslogs-region        = data.aws_region.current.name
-          awslogs-stream-prefix = "chromadb"
-        }
-      }
-    },
-    {
-      name      = "ollama"
-      image     = "${aws_ecr_repository.pluto["ollama"].repository_url}:${var.image_tag}"
-      essential = true
-      portMappings = [
-        {
-          containerPort = 11434
-          protocol      = "tcp"
-        }
-      ]
-      mountPoints = [
-        {
-          sourceVolume  = "ollama-data"
-          containerPath = "/root/.ollama"
-          readOnly      = false
-        }
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = aws_cloudwatch_log_group.pluto.name
-          awslogs-region        = data.aws_region.current.name
-          awslogs-stream-prefix = "ollama"
+          awslogs-stream-prefix = "n8n"
         }
       }
     },
@@ -633,24 +661,24 @@ resource "aws_ecs_task_definition" "pluto" {
           value = "true"
         },
         {
-          name  = "CHROMA_HTTP_HOST"
-          value = "127.0.0.1"
+          name  = "VECTOR_DB"
+          value = "opensearch"
         },
         {
-          name  = "CHROMA_HTTP_PORT"
-          value = "8000"
+          name  = "OPENSEARCH_URL"
+          value = aws_opensearchserverless_collection.pluto.collection_endpoint
         },
         {
           name  = "RAG_EMBEDDING_ENGINE"
-          value = "ollama"
+          value = "openai"
         },
         {
           name  = "RAG_EMBEDDING_MODEL"
-          value = "nomic-embed-text"
+          value = "text-embedding"
         },
         {
-          name  = "OLLAMA_BASE_URL"
-          value = "http://127.0.0.1:11434"
+          name  = "RAG_OPENAI_API_BASE_URL"
+          value = "http://127.0.0.1:4000/v1"
         },
         {
           name  = "WEBUI_AUTH"
@@ -689,14 +717,6 @@ resource "aws_ecs_task_definition" "pluto" {
       dependsOn = [
         {
           containerName = "litellm"
-          condition     = "START"
-        },
-        {
-          containerName = "chromadb"
-          condition     = "START"
-        },
-        {
-          containerName = "ollama"
           condition     = "START"
         }
       ]

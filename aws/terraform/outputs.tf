@@ -17,8 +17,8 @@ output "service_urls" {
   value = {
     openwebui = "https://${local.service_hosts.openwebui}"
     litellm   = "https://${local.service_hosts.litellm}"
-    chromadb  = "https://${local.service_hosts.chromadb}"
-    ollama    = "https://${local.service_hosts.ollama}"
+    n8n       = "https://${local.service_hosts.n8n}"
+    ddg       = "https://${local.service_hosts.ddg}"
   }
   description = "Service URLs routed via the NLB and Traefik."
 }
@@ -38,4 +38,14 @@ output "ecr_repository_urls" {
     for key, repo in aws_ecr_repository.pluto : key => repo.repository_url
   }
   description = "ECR repository URLs for each service."
+}
+
+output "rds_endpoint" {
+  value       = aws_db_instance.pluto.address
+  description = "RDS PostgreSQL endpoint for database restore."
+}
+
+output "opensearch_endpoint" {
+  value       = aws_opensearchserverless_collection.pluto.collection_endpoint
+  description = "OpenSearch Serverless collection endpoint."
 }

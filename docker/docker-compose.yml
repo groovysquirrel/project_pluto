@@ -81,6 +81,11 @@ volumes:
   pgadmin-data:
     name: pluto-pgadmin-data
 
+  # MCP Server Manager - configuration and data
+  # FastMCP - server data
+  fastmcp-data:
+    name: pluto-fastmcp-data
+
 # ------------------------------------------------------------------------------
 # SERVICES (CONTAINERS)
 # ------------------------------------------------------------------------------
@@ -572,60 +577,78 @@ services:
         condition: service_healthy
 
   # ============================================================================
-  # DUCKDUCKGO SEARCH MCP SERVER
+  # FASTMCP IDE + SERVER
   # ============================================================================
-  # A privacy-focused MCP (Model Context Protocol) server that provides web
-  # search capabilities to AI agents. No API key required!
+  # FastMCP provides a Python-based MCP server for building custom AI tools,
+  # combined with code-server (VS Code in browser) for editing MCP scripts.
   #
-  # Features:
-  #   - DuckDuckGo web search (privacy-first, no tracking)
-  #   - URL fetching and content extraction
-  #   - Metadata extraction from URLs
-  #   - Felo AI search integration
+  # Access:
+  #   - IDE: https://mcp.pluto.local (VS Code in browser)
+  #   - MCP: https://mcp.pluto.local/mcp (MCP API endpoint for OpenWebUI/n8n)
   #
-  # MCP allows AI agents (like those in n8n or custom apps) to use tools
-  # like web search as part of their reasoning process.
+  # Docs: https://gofastmcp.com
 
-  duckduckgo-mcp:
-    image: mekayelanik/duckduckgo-mcp:stable
-    container_name: mcp-ddg
+  fastmcp:
+    build: ./fastmcp
+    # Enable x86 emulation for Apple Silicon Macs (Continue extension needs x86 binary)
+    # Note: Cloud deployments (AWS/Azure) use x86_64 natively, so this only affects local dev
+    platform: linux/amd64
+    container_name: app-fastmcp
     restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
+    # Note: no-new-privileges removed to allow sudo for Continue CLI
 
     environment:
-      # Port the MCP server listens on
-      PORT: 8020
-      # Protocol: SHTTP (Streamable HTTP) for MCP communication
-      PROTOCOL: SHTTP
-      # SECURITY: Restrict CORS to our domain only
-      CORS: "https://*.${PLUTO_DOMAIN:-pluto.local}"
-      # Timezone
       TZ: ${TIMEZONE:-America/New_York}
+      PYTHONUNBUFFERED: "1"
+      PUID: "1000"
+      PGID: "1000"
+      # code-server settings
+      DEFAULT_WORKSPACE: /config/workspace/servers
+      # Continue (VS Code AI assistant) defaults for LiteLLM
+      LITELLM_BASE_URL: https://litellm.${PLUTO_DOMAIN:-pluto.local}/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      LITELLM_MODEL: ${LITELLM_DEFAULT_MODEL:-claude-3.5-sonnet}
+
+    volumes:
+      # Persist code-server config, extensions, and workspace
+      - fastmcp-data:/config
+      # Mount server.py template (copied on first run)
+      - ./fastmcp/server.py:/defaults/server.py.default:ro
+      # Trust Pluto CA for HTTPS to LiteLLM
+      - ./traefik/certs/pluto-ca.crt:/usr/local/share/ca-certificates/pluto-ca.crt:ro
 
     networks:
-      - pluto-network
+      pluto-network:
+        ipv4_address: 172.20.0.20
 
     # Use dnsmasq for DNS resolution
     dns:
       - 172.20.0.53 # dnsmasq container
       - 8.8.8.8 # fallback
 
-    # Traefik routing labels
+    # Traefik routing labels - dual routing for IDE and MCP API
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.ddg.rule=Host(`ddg.${PLUTO_DOMAIN:-pluto.local}`)"
-      - "traefik.http.routers.ddg.entrypoints=websecure"
-      - "traefik.http.routers.ddg.tls=true"
-      - "traefik.http.services.ddg.loadbalancer.server.port=8020"
+      # IDE router (code-server) - catch-all for mcp.pluto.local
+      - "traefik.http.routers.mcp-ide.rule=Host(`mcp.${PLUTO_DOMAIN:-pluto.local}`) && !PathPrefix(`/mcp`)"
+      - "traefik.http.routers.mcp-ide.entrypoints=websecure"
+      - "traefik.http.routers.mcp-ide.tls=true"
+      - "traefik.http.routers.mcp-ide.service=mcp-ide"
+      - "traefik.http.services.mcp-ide.loadbalancer.server.port=8443"
+      # MCP API router (FastMCP) - /mcp path
+      - "traefik.http.routers.mcp-api.rule=Host(`mcp.${PLUTO_DOMAIN:-pluto.local}`) && PathPrefix(`/mcp`)"
+      - "traefik.http.routers.mcp-api.entrypoints=websecure"
+      - "traefik.http.routers.mcp-api.tls=true"
+      - "traefik.http.routers.mcp-api.service=mcp-api"
+      - "traefik.http.services.mcp-api.loadbalancer.server.port=8000"
 
-    # Health check for the MCP server
+    # Health check for FastMCP
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- http://localhost:8020/healthz >/dev/null 2>&1" ]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/mcp || exit 0" ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
 
   # ============================================================================
   # MANAGEMENT TOOLS
@@ -699,7 +722,7 @@ services:
       - openwebui
       - n8n
       - litellm
-      - duckduckgo-mcp
+      - fastmcp
 
 # ==============================================================================
 # URLS (Domain-based routing via Traefik)
@@ -711,7 +734,7 @@ services:
 #   💬 OpenWebUI:             https://openwebui.pluto.local
 #   🔀 LiteLLM:               https://litellm.pluto.local
 #   ⚡ n8n:                   https://n8n.pluto.local
-#   🔍 DuckDuckGo MCP:        https://ddg.pluto.local
+#   🔧 MCP IDE:              https://mcp.pluto.local (VS Code + MCP API)
 #
 #   Admin Tools (port 8443):
 #   🐘 pgAdmin:               https://pgadmin.pluto.local:8443

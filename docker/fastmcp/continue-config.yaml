@@ -1,0 +1,55 @@
+version: "1.0.0"
+# Continue v1.3 Configuration for LiteLLM
+# Placeholders are replaced on container startup
+
+name: "Project Pluto MCP"
+allowAnonymousTelemetry: false
+
+models:
+  - name: claude-3.5-sonnet
+    title: Claude 3.5 Sonnet
+    provider: openai
+    model: __LITELLM_MODEL__
+    apiBase: __LITELLM_BASE_URL__
+    apiKey: __LITELLM_API_KEY__
+    
+  - name: claude-3.7-sonnet
+    title: Claude 3.7 Sonnet
+    provider: openai
+    model: claude-3.7-sonnet
+    apiBase: __LITELLM_BASE_URL__
+    apiKey: __LITELLM_API_KEY__
+
+  - name: claude-3-haiku
+    title: Claude 3 Haiku (Fast)
+    provider: openai
+    model: claude-3-haiku
+    apiBase: __LITELLM_BASE_URL__
+    apiKey: __LITELLM_API_KEY__
+
+  - name: llama3.1-70b
+    title: Llama 3.1 70B
+    provider: openai
+    model: llama3.1-70b
+    apiBase: __LITELLM_BASE_URL__
+    apiKey: __LITELLM_API_KEY__
+
+  - name: nova-pro
+    title: Amazon Nova Pro
+    provider: openai
+    model: nova-pro
+    apiBase: __LITELLM_BASE_URL__
+    apiKey: __LITELLM_API_KEY__
+
+tabAutocompleteModel:
+  title: Claude 3 Haiku (Fast)
+  provider: openai
+  model: claude-3-haiku
+  apiBase: __LITELLM_BASE_URL__
+  apiKey: __LITELLM_API_KEY__
+
+embeddingsProvider:
+  provider: openai
+  model: text-embedding
+  apiBase: __LITELLM_BASE_URL__
+  apiKey: __LITELLM_API_KEY__

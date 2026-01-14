@@ -145,8 +145,8 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 print_info "Logging in to ECR (${REGION})"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
-read -r TRAEFIK_REPO OPENWEBUI_REPO LITELLM_REPO CHROMADB_REPO OLLAMA_REPO <<EOF_REPOS
-$(TF_DIR="$TF_DIR" python - <<'PY'
+read -r TRAEFIK_REPO OPENWEBUI_REPO LITELLM_REPO N8N_REPO <<EOF_REPOS
+$(TF_DIR="$TF_DIR" python3 - <<'PY'
 import json
 import subprocess
 import os
@@ -159,7 +159,7 @@ data = json.loads(subprocess.check_output([
     "ecr_repository_urls",
 ]).decode())
 
-print(data["traefik"], data["openwebui"], data["litellm"], data["chromadb"], data["ollama"])
+print(data["traefik"], data["openwebui"], data["litellm"], data["n8n"])
 PY
 )
 EOF_REPOS
@@ -174,24 +174,17 @@ print_info "Pulling and pushing public images"
 docker pull ghcr.io/open-webui/open-webui:main
 docker tag ghcr.io/open-webui/open-webui:main "${OPENWEBUI_REPO}:${IMAGE_TAG}"
 
-
 docker pull ghcr.io/berriai/litellm:main-latest
 docker tag ghcr.io/berriai/litellm:main-latest "${LITELLM_REPO}:${IMAGE_TAG}"
 
-
-docker pull ghcr.io/chroma-core/chroma:latest
-docker tag ghcr.io/chroma-core/chroma:latest "${CHROMADB_REPO}:${IMAGE_TAG}"
-
-
-docker pull ollama/ollama:latest
-docker tag ollama/ollama:latest "${OLLAMA_REPO}:${IMAGE_TAG}"
+docker pull docker.n8n.io/n8nio/n8n:latest
+docker tag docker.n8n.io/n8nio/n8n:latest "${N8N_REPO}:${IMAGE_TAG}"
 
 print_info "Pushing images to ECR"
 docker push "${TRAEFIK_REPO}:${IMAGE_TAG}"
 docker push "${OPENWEBUI_REPO}:${IMAGE_TAG}"
 docker push "${LITELLM_REPO}:${IMAGE_TAG}"
-docker push "${CHROMADB_REPO}:${IMAGE_TAG}"
-docker push "${OLLAMA_REPO}:${IMAGE_TAG}"
+docker push "${N8N_REPO}:${IMAGE_TAG}"
 
 print_success "Images pushed to ECR"
 

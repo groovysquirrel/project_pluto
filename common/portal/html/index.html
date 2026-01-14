@@ -591,22 +591,10 @@
                 <div class="nav-section">
                     <div class="nav-section-title">MCP Tools</div>
 
-                    <div class="nav-item" data-app="mcpjungle" data-url="https://mcp.pluto.local"
-                        data-tooltip="MCP Gateway" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🌳</div>
-                        <span class="nav-item-text">MCPJungle</span>
-                    </div>
-
-                    <div class="nav-item" data-app="ddg-mcp" data-url="https://ddg.pluto.local/healthz"
-                        data-tooltip="DuckDuckGo Search" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🔍</div>
-                        <span class="nav-item-text">DuckDuckGo MCP</span>
-                    </div>
-
-                    <div class="nav-item" data-app="browserbase" data-tooltip="BrowserBase (MCP)"
-                        onclick="showMcpInfo('browserbase')">
-                        <div class="nav-item-icon">🌐</div>
-                        <span class="nav-item-text">BrowserBase</span>
+                    <div class="nav-item" data-app="mcp-manager" data-url="https://mcp.pluto.local"
+                        data-tooltip="FastMCP Server" onclick="loadApp(this)">
+                        <div class="nav-item-icon">🐍</div>
+                        <span class="nav-item-text">FastMCP</span>
                     </div>
                 </div>
 
@@ -614,17 +602,13 @@
                 <div class="nav-section">
                     <div class="nav-section-title">Management Tools</div>
 
-                    <div class="nav-item" data-app="portainer" data-url="https://portainer.pluto.local"
-                        data-tooltip="Docker Management" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🛠️</div>
-                        <span class="nav-item-text">Portainer</span>
-                    </div>
-
-                    <div class="nav-item" data-app="pgadmin" data-url="https://pgadmin.pluto.local"
+                    <div class="nav-item" data-app="pgadmin" data-url="https://pgadmin.pluto.local:8443"
                         data-tooltip="PostgreSQL UI" onclick="loadApp(this)">
                         <div class="nav-item-icon">🐘</div>
                         <span class="nav-item-text">pgAdmin</span>
                     </div>
+
+
 
                     <div class="nav-item" data-app="traefik" data-url="https://traefik.pluto.local"
                         data-tooltip="Traefik Dashboard" onclick="loadApp(this)">
@@ -709,11 +693,9 @@
             openwebui: { name: 'OpenWebUI', subtitle: 'AI Chat Interface', url: 'https://openwebui.pluto.local', iframeBlocked: false },
             litellm: { name: 'LiteLLM', subtitle: 'LLM Proxy & Monitoring', url: 'https://litellm.pluto.local/ui', iframeBlocked: false },
             n8n: { name: 'n8n', subtitle: 'Workflow Automation', url: 'https://n8n.pluto.local', iframeBlocked: true },
-            mcpjungle: { name: 'MCPJungle', subtitle: 'MCP Gateway & Registry', url: 'https://mcp.pluto.local', iframeBlocked: false },
-            'ddg-mcp': { name: 'DuckDuckGo MCP', subtitle: 'Web Search for AI Agents', url: 'https://ddg.pluto.local/healthz', iframeBlocked: false },
-            portainer: { name: 'Portainer', subtitle: 'Docker Management', url: 'https://portainer.pluto.local', iframeBlocked: true },
-            pgadmin: { name: 'pgAdmin', subtitle: 'PostgreSQL Manager', url: 'https://pgadmin.pluto.local', iframeBlocked: true },
-            traefik: { name: 'Traefik', subtitle: 'Reverse Proxy Dashboard', url: 'https://traefik.pluto.local', iframeBlocked: false },
+            'mcp-manager': { name: 'FastMCP', subtitle: 'Python MCP Server + Inspector', url: 'https://mcp.pluto.local', iframeBlocked: false },
+            pgadmin: { name: 'pgAdmin', subtitle: 'PostgreSQL Manager', url: 'https://pgadmin.pluto.local:8443', iframeBlocked: true },
+            traefik: { name: 'Traefik', subtitle: 'Reverse Proxy Dashboard', url: 'https://traefik.pluto.local:8443', iframeBlocked: false },
             qdrant: { name: 'Qdrant', subtitle: 'Vector Database', url: 'https://qdrant.pluto.local:8443', iframeBlocked: false }
         };
 

@@ -36,6 +36,7 @@ VOLUME_NAMES=(
     "qdrant-data"
     "pgadmin-data"
     "ollama-data"
+    "fastmcp-data"
 )
 
 # Databases to dump (shared Postgres)

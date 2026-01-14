@@ -6,12 +6,9 @@ http:
     litellm:
       rule: "Host(`litellm.__PLUTO_DOMAIN__`)"
       service: litellm
-    chromadb:
-      rule: "Host(`chromadb.__PLUTO_DOMAIN__`)"
-      service: chromadb
-    ollama:
-      rule: "Host(`ollama.__PLUTO_DOMAIN__`)"
-      service: ollama
+    n8n:
+      rule: "Host(`n8n.__PLUTO_DOMAIN__`)"
+      service: n8n
 
   services:
     openwebui:
@@ -22,11 +19,7 @@ http:
       loadBalancer:
         servers:
           - url: "http://127.0.0.1:4000"
-    chromadb:
+    n8n:
       loadBalancer:
         servers:
-          - url: "http://127.0.0.1:8000"
-    ollama:
-      loadBalancer:
-        servers:
-          - url: "http://127.0.0.1:11434"
+          - url: "http://127.0.0.1:5678"

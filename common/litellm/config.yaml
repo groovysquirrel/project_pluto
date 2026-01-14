@@ -114,6 +114,17 @@ model_list:
       model: bedrock/us.amazon.nova-lite-v1:0
       aws_region_name: us-east-1
 
+  # ---------------------------------------------------------------------------
+  # AMAZON TITAN EMBEDDINGS (For RAG in AWS deployment)
+  # ---------------------------------------------------------------------------
+  # Used by OpenWebUI for RAG when deployed to AWS.
+  # This model converts text to vectors for semantic search.
+  
+  - model_name: text-embedding
+    litellm_params:
+      model: bedrock/amazon.titan-embed-text-v2:0
+      aws_region_name: us-east-1
+
   # ============================================================================
   # WANT TO ADD MORE PROVIDERS?
   # ============================================================================
