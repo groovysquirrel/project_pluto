@@ -542,6 +542,10 @@ services:
       N8N_BASIC_AUTH_USER: ${ADMIN_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD must be set in .env}
 
+      # Encryption key for credentials - MUST be consistent across backups/restores
+      # SECURITY: No default - must be set in .env
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY must be set in .env}
+
       # Webhook URL - used when n8n needs to receive external triggers
       WEBHOOK_URL: https://n8n.${PLUTO_DOMAIN:-pluto.local}/
 

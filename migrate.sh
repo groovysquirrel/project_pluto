@@ -6,8 +6,9 @@
 # This script handles backing up and restoring Project Pluto data in a portable
 # format that works across Docker and cloud deployments.
 #
-# Backup format (pluto_backup_YYYYMMDD_HHMMSS.tar.gz):
+# Backup format v2 (pluto_backup_YYYYMMDD_HHMMSS.tar.gz):
 #   - manifest.json
+#   - env_backup (.env file with encryption keys and secrets)
 #   - postgres/*.sql (logical dumps)
 #   - volumes/* (volume contents)
 #
@@ -37,6 +38,7 @@ VOLUME_NAMES=(
     "pgadmin-data"
     "ollama-data"
     "fastmcp-data"
+    "chromadb-data"
 )
 
 # Databases to dump (shared Postgres)
@@ -87,6 +89,21 @@ wait_for_postgres() {
     print_error "Postgres did not become ready in time."
 }
 
+# Backup .env file (contains encryption keys and secrets)
+backup_env_file() {
+    local output_dir="$1"
+    local env_file="${REPO_ROOT}/.env"
+    
+    if [ -f "$env_file" ]; then
+        print_info "Backing up .env file (contains encryption keys)..." >&2
+        cp "$env_file" "${output_dir}/env_backup"
+        echo "true"
+    else
+        print_warning ".env file not found, skipping" >&2
+        echo "false"
+    fi
+}
+
 # ------------------------------------------------------------------------------
 # BACKUP FUNCTION
 # ------------------------------------------------------------------------------
@@ -95,8 +112,8 @@ backup_postgres() {
     local output_dir="$1"
     local dumped_dbs=()
 
-    print_info "Ensuring Postgres is running..."
-    compose up -d postgres
+    print_info "Ensuring Postgres is running..." >&2
+    compose up -d postgres >&2
     wait_for_postgres
 
     mkdir -p "$output_dir"
@@ -105,11 +122,11 @@ backup_postgres() {
         local exists
         exists=$(compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' psql -U '${POSTGRES_USER}' -At -c \"select 1 from pg_database where datname='${db}'\"" | tr -d '\r')
         if [ "$exists" = "1" ]; then
-            print_info "Dumping database: ${db}"
+            print_info "Dumping database: ${db}" >&2
             compose exec -T postgres sh -lc "PGPASSWORD='${POSTGRES_PASSWORD}' pg_dump -U '${POSTGRES_USER}' -d '${db}' --clean --if-exists --no-owner --no-privileges" > "${output_dir}/${db}.sql"
             dumped_dbs+=("$db")
         else
-            print_warning "Database not found, skipping: ${db}"
+            print_warning "Database not found, skipping: ${db}" >&2
         fi
     done
 
@@ -126,21 +143,21 @@ backup_volumes() {
             mount_args+=" -v pluto-${vol}:/backup/${vol}"
             backed_up_volumes+=("$vol")
         else
-            print_warning "Volume not found, skipping: pluto-${vol}"
+            print_warning "Volume not found, skipping: pluto-${vol}" >&2
         fi
     done
 
     if [ -z "$mount_args" ]; then
-        print_warning "No volumes found to back up."
+        print_warning "No volumes found to back up." >&2
         printf '%s\n' "${backed_up_volumes[@]}"
         return 0
     fi
 
     mkdir -p "$output_dir"
 
-    print_info "Copying volume data..."
+    print_info "Copying volume data..." >&2
     docker run --rm $mount_args -v "${output_dir}:/host" busybox \
-        sh -c "tar -cf /host/volumes.tar -C /backup ."
+        sh -c "tar -cf /host/volumes.tar -C /backup ." 2>&2
 
     tar -xf "${output_dir}/volumes.tar" -C "$output_dir"
     rm -f "${output_dir}/volumes.tar"
@@ -168,9 +185,13 @@ do_backup() {
         [[ -n "$line" ]] && BACKED_UP_VOLUMES+=("$line")
     done < <(backup_volumes "${TMP_DIR}/volumes")
 
+    # Backup .env file (contains encryption keys)
+    ENV_BACKED_UP=$(backup_env_file "${TMP_DIR}")
+
     print_info "Writing manifest"
     PLUTO_DUMPED_DBS="$(printf '%s\n' "${DUMPED_DBS[@]}")" \
     PLUTO_BACKED_UP_VOLUMES="$(printf '%s\n' "${BACKED_UP_VOLUMES[@]}")" \
+    PLUTO_ENV_BACKED_UP="${ENV_BACKED_UP}" \
     python3 - <<'PY' > "${TMP_DIR}/manifest.json"
 import json
 import os
@@ -182,11 +203,12 @@ def parse_list(value):
     return [item for item in value.split("\n") if item]
 
 manifest = {
-    "format_version": 1,
+    "format_version": 2,
     "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "project": "pluto",
     "postgres_dumps": parse_list(os.environ.get("PLUTO_DUMPED_DBS", "")),
     "volumes": parse_list(os.environ.get("PLUTO_BACKED_UP_VOLUMES", "")),
+    "env_backup": os.environ.get("PLUTO_ENV_BACKED_UP", "false") == "true",
 }
 
 print(json.dumps(manifest, indent=2))
@@ -289,6 +311,43 @@ restore_postgres() {
     done
 }
 
+# Restore .env file (merges critical keys into existing .env if present)
+restore_env_file() {
+    local backup_dir="$1"
+    local backup_env="${backup_dir}/env_backup"
+    local target_env="${REPO_ROOT}/.env"
+    
+    if [ ! -f "$backup_env" ]; then
+        print_info "No .env backup found in archive (v1 format backup)"
+        return 0
+    fi
+    
+    if [ -f "$target_env" ]; then
+        print_info "Merging encryption keys from backup into existing .env..."
+        # Extract and merge critical encryption/secret keys from backup
+        for key in N8N_ENCRYPTION_KEY WEBUI_SECRET_KEY LITELLM_MASTER_KEY; do
+            local value
+            value=$(grep "^${key}=" "$backup_env" | cut -d'=' -f2-)
+            if [ -n "$value" ] && ! echo "$value" | grep -q "GENERATE_ME_WITH_OPENSSL"; then
+                # Update the key in existing .env if it exists
+                if grep -q "^${key}=" "$target_env"; then
+                    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$target_env"
+                    print_success "Restored ${key} from backup"
+                else
+                    # Key doesn't exist in target, append it
+                    echo "${key}=${value}" >> "$target_env"
+                    print_success "Added ${key} from backup"
+                fi
+            fi
+        done
+        rm -f "${target_env}.bak"
+    else
+        print_info "Restoring complete .env file from backup..."
+        cp "$backup_env" "$target_env"
+        print_success "Restored .env file"
+    fi
+}
+
 do_restore() {
     local file_to_restore=${1:-$BACKUP_FILE}
     local services_stopped=false
@@ -351,6 +410,9 @@ do_restore() {
     else
         print_warning "No database dumps found to restore."
     fi
+
+    # Restore .env file (encryption keys) - do this BEFORE starting services
+    restore_env_file "${TMP_DIR}"
 
     rm -rf "${TMP_DIR}"
 

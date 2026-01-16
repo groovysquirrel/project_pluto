@@ -1,0 +1,71 @@
+# LiteLLM Configuration
+# Maps model names to underlying provider endpoints
+
+model_list:
+  # AWS Bedrock Models
+  # Format: 
+  # - model_name: [friendly name you want to use]
+  #   litellm_params:
+  #     model: bedrock/[bedrock model ID]
+  #     region_name: [AWS region]
+
+  # Claude 3 Opus (via AWS Bedrock)
+  - model_name: "claude-3-opus"
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-opus-20240229-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+
+  # Claude 3.5 Sonnet (via AWS Bedrock)  
+  - model_name: "claude-3.5-sonnet"
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+  
+  # Claude 3 Sonnet (via AWS Bedrock)
+  - model_name: "claude-3-sonnet"
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-sonnet-20240229-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+
+  # Claude 3 Haiku (via AWS Bedrock)
+  - model_name: "claude-3-haiku"
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-haiku-20240307-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+      
+  # NEW: Claude Anthropic 4.5 Opus (via AWS Bedrock)
+  - model_name: "claude-4.5-opus"
+    litellm_params:
+      model: "bedrock/anthropic.claude-4-5-opus-20240815-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+
+  # Default fallback model
+  - model_name: "default-model" 
+    litellm_params:
+      model: "bedrock/anthropic.claude-3-5-sonnet-20240620-v1:0"
+      region_name: ${AWS_REGION:-us-east-1}
+
+# Set the default model
+default_model: "claude-3.5-sonnet"
+
+# Router settings for load balancing and fallbacks
+router_settings:
+  # Automatically retry failed requests with fallback models
+  num_retries: 3
+
+# Environment variable mappings
+# This allows using simplified env vars in other services
+env:
+  OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+
+# Logging settings
+litellm_settings:
+  drop_params: true  # Drop unnecessary params from response
+  success_callback: ["langfuse"]  # Log successful requests to Langfuse if configured
+
+# API settings
+api_key:
+  # Master key for all requests
+  - key: ${LITELLM_MASTER_KEY}
+    aliases: ["litellm-master"] 
+    permissions: ["all"]

@@ -15,6 +15,7 @@
 
 # OTHER
 *.tar.gz
+*.gz
 .terraform
 .terraform.*
 

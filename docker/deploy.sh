@@ -357,6 +357,14 @@ if grep -q "GENERATE_ME_WITH_OPENSSL" "${REPO_ROOT}/.env" 2>/dev/null; then
         SECRETS_UPDATED=true
     fi
     
+    # Generate N8N_ENCRYPTION_KEY (used to encrypt credentials in database)
+    if grep -q "N8N_ENCRYPTION_KEY=GENERATE_ME_WITH_OPENSSL" "${REPO_ROOT}/.env"; then
+        NEW_SECRET=$(generate_secret)
+        sed -i.bak "s|N8N_ENCRYPTION_KEY=GENERATE_ME_WITH_OPENSSL|N8N_ENCRYPTION_KEY=${NEW_SECRET}|g" "${REPO_ROOT}/.env"
+        print_success "Generated N8N_ENCRYPTION_KEY"
+        SECRETS_UPDATED=true
+    fi
+    
     rm -f "${REPO_ROOT}/.env.bak"
 fi
 
