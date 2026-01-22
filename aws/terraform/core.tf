@@ -6,6 +6,23 @@
 terraform {
   required_version = ">= 1.5.0"
 
+  # REMOTE STATE BACKEND (Recommended)
+  # Stores state in S3 instead of locally, preventing accidental commits.
+  # To enable, uncomment and create the S3 bucket + DynamoDB table first:
+  #   aws s3 mb s3://pluto-terraform-state-ACCOUNT_ID --region ca-central-1
+  #   aws dynamodb create-table --table-name pluto-terraform-lock \
+  #     --attribute-definitions AttributeName=LockID,AttributeType=S \
+  #     --key-schema AttributeName=LockID,KeyType=HASH \
+  #     --billing-mode PAY_PER_REQUEST --region ca-central-1
+  #
+  # backend "s3" {
+  #   bucket         = "pluto-terraform-state-ACCOUNT_ID"  # Replace ACCOUNT_ID
+  #   key            = "pluto/terraform.tfstate"
+  #   region         = "ca-central-1"
+  #   encrypt        = true
+  #   dynamodb_table = "pluto-terraform-lock"  # For state locking
+  # }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"

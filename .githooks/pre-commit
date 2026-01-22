@@ -1,0 +1,52 @@
+#!/bin/bash
+# Pre-commit hook to prevent committing secrets
+#
+# Install this hook:
+#   cp .githooks/pre-commit .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# Or configure git to use the hooks directory:
+#   git config core.hooksPath .githooks
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "🔍 Checking for secrets..."
+
+# Check for Terraform state files
+if git diff --cached --name-only | grep -qE '\.tfstate(\.backup)?$'; then
+    echo -e "${RED}❌ ERROR: Terraform state files detected!${NC}"
+    echo "   These files contain secrets and should never be committed."
+    echo "   Remove them with: git reset HEAD <file>"
+    exit 1
+fi
+
+# Check for .env files (except .env.example)  
+if git diff --cached --name-only | grep -E '\.env$' | grep -v '\.example$'; then
+    echo -e "${RED}❌ ERROR: .env files detected!${NC}"
+    echo "   These files may contain secrets."
+    echo "   Use .env.example for templates instead."
+    exit 1
+fi
+
+# Check for common secret patterns in staged files
+PATTERNS=(
+    'AKIA[0-9A-Z]{16}'           # AWS Access Key ID
+    'GOCSPX-[a-zA-Z0-9_-]+'      # Google OAuth Client Secret
+    'sk-[a-zA-Z0-9]{48}'         # OpenAI API Key
+    'ghp_[a-zA-Z0-9]{36}'        # GitHub Personal Access Token
+)
+
+for pattern in "${PATTERNS[@]}"; do
+    if git diff --cached -U0 | grep -qE "$pattern"; then
+        echo -e "${RED}❌ ERROR: Potential secret detected matching pattern: $pattern${NC}"
+        echo "   Review your changes and remove any secrets."
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}✓ No secrets detected${NC}"
+exit 0
