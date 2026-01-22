@@ -15,6 +15,12 @@ variable "subdomain_prefix" {
   description = "Optional subdomain prefix (example: pluto). Leave blank for root zone."
 }
 
+variable "cognito_custom_domain" {
+  type        = string
+  default     = ""
+  description = "Optional custom domain for Cognito (e.g. auth.pluto.example.com)."
+}
+
 variable "vpc_cidr" {
   type        = string
   default     = "10.20.0.0/16"
@@ -47,7 +53,7 @@ variable "ecs_memory" {
 
 variable "db_instance_class" {
   type        = string
-  default     = "db.t4g.micro"
+  default     = "db.t4g.small"
   description = "RDS instance class."
 }
 
@@ -73,4 +79,34 @@ variable "image_tag" {
   type        = string
   default     = "latest"
   description = "Image tag pushed to ECR for all services."
+}
+
+variable "allowed_email_domains" {
+  type        = list(string)
+  default     = ["patternsatscale.com", "infotech.com", "pluto.local"]
+  description = "List of allowed email domains for Cognito registration."
+}
+
+# -----------------------------------------------------------------------------
+# GOOGLE OAUTH CONFIGURATION
+# -----------------------------------------------------------------------------
+
+variable "enable_google_oauth" {
+  type        = bool
+  default     = true
+  description = "Enable Google as a Cognito identity provider."
+}
+
+variable "google_oauth_client_id" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Google OAuth 2.0 Client ID from Google Cloud Console."
+}
+
+variable "google_oauth_client_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Google OAuth 2.0 Client Secret from Google Cloud Console."
 }

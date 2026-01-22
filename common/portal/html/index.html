@@ -4,868 +4,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Pluto - AI Platform</title>
-
-    <!-- SEO Meta Tags -->
-    <meta name="description" content="Project Pluto - Integrated AI development platform">
+    <title>Project Pluto | AI Development Platform</title>
+    <meta name="description" content="Your AI development ecosystem. Build, deploy, and manage AI applications with OpenWebUI, n8n, and LiteLLM.">
 
     <!-- Favicon -->
-    <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+    <link rel="icon" type="image/png" href="logo.png">
 
-    <!-- Google Fonts - Roboto for corporate feel (matches Info-Tech) -->
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-
-    <style>
-        /* ==================================================================
-           CSS Variables - Corporate Theme (inspired by Info-Tech)
-           ================================================================== */
-        :root {
-            /* Primary colors */
-            --primary-blue: #2576B7;
-            --primary-blue-dark: #1a5a8f;
-            --primary-blue-light: #e8f4fc;
-
-            /* Accent colors */
-            --accent-green: #24842E;
-            --accent-green-dark: #1a6622;
-
-            /* Neutral colors */
-            --bg-white: #ffffff;
-            --bg-light: #f8f9fa;
-            --bg-sidebar: #1e2a3a;
-            --bg-sidebar-hover: #2a3a4e;
-
-            /* Text colors */
-            --text-dark: #2c3e50;
-            --text-medium: #5a6977;
-            --text-light: #8492a6;
-            --text-white: #ffffff;
-
-            /* Borders */
-            --border-color: #e1e5eb;
-            --border-light: #f0f2f5;
-
-            /* Layout */
-            --sidebar-width-expanded: 240px;
-            --sidebar-width-collapsed: 64px;
-            --header-height: 56px;
-
-            /* Transitions */
-            --transition-fast: 0.15s ease;
-            --transition-normal: 0.25s ease;
-        }
-
-        /* ==================================================================
-           Reset & Base
-           ================================================================== */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            height: 100%;
-            overflow: hidden;
-        }
-
-        body {
-            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: var(--bg-light);
-            color: var(--text-dark);
-        }
-
-        /* ==================================================================
-           Layout Structure
-           ================================================================== */
-        .app-container {
-            display: flex;
-            height: 100vh;
-        }
-
-        /* ==================================================================
-           Sidebar Navigation
-           ================================================================== */
-        .sidebar {
-            width: var(--sidebar-width-expanded);
-            background: var(--bg-sidebar);
-            display: flex;
-            flex-direction: column;
-            transition: width var(--transition-normal);
-            z-index: 100;
-            flex-shrink: 0;
-            overflow: hidden;
-        }
-
-        .sidebar.collapsed {
-            width: var(--sidebar-width-collapsed);
-        }
-
-        /* Logo Section */
-        .sidebar-header {
-            padding: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            min-height: 64px;
-            flex-shrink: 0;
-        }
-
-        .sidebar.collapsed .sidebar-header {
-            padding: 16px 12px;
-            justify-content: center;
-        }
-
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: var(--primary-blue);
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-
-        .logo-text {
-            font-size: 16px;
-            font-weight: 700;
-            color: var(--text-white);
-            white-space: nowrap;
-            overflow: hidden;
-            opacity: 1;
-            transition: opacity var(--transition-fast);
-        }
-
-        .sidebar.collapsed .logo-text {
-            opacity: 0;
-            width: 0;
-        }
-
-        /* Toggle Button */
-        .sidebar-toggle {
-            margin-left: auto;
-            background: none;
-            border: none;
-            color: var(--text-light);
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 4px;
-            transition: all var(--transition-fast);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-
-        .sidebar-toggle:hover {
-            background: rgba(255, 255, 255, 0.1);
-            color: var(--text-white);
-        }
-
-        .sidebar.collapsed .sidebar-toggle {
-            margin-left: 0;
-        }
-
-        .sidebar.collapsed .logo-icon {
-            display: none;
-        }
-
-        .toggle-icon {
-            transition: transform var(--transition-normal);
-        }
-
-        .sidebar.collapsed .toggle-icon {
-            transform: rotate(180deg);
-        }
-
-        /* Navigation */
-        .sidebar-nav {
-            flex: 1;
-            padding: 16px 8px;
-            overflow: hidden;
-        }
-
-        .nav-section {
-            margin-bottom: 24px;
-        }
-
-        .nav-section-title {
-            font-size: 11px;
-            font-weight: 500;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-light);
-            padding: 8px 12px;
-            white-space: nowrap;
-            overflow: hidden;
-        }
-
-        .sidebar.collapsed .nav-section-title {
-            opacity: 0;
-            height: 0;
-            padding: 0;
-            margin: 0;
-        }
-
-        .nav-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-            margin-bottom: 4px;
-            text-decoration: none;
-            color: var(--text-light);
-        }
-
-        .nav-item:hover {
-            background: var(--bg-sidebar-hover);
-            color: var(--text-white);
-        }
-
-        .nav-item.active {
-            background: var(--primary-blue);
-            color: var(--text-white);
-        }
-
-        .nav-item-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            flex-shrink: 0;
-            background: rgba(255, 255, 255, 0.1);
-        }
-
-        .nav-item.active .nav-item-icon {
-            background: rgba(255, 255, 255, 0.2);
-        }
-
-        .nav-item-text {
-            white-space: nowrap;
-            overflow: hidden;
-            opacity: 1;
-            transition: opacity var(--transition-fast);
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        .sidebar.collapsed .nav-item-text {
-            opacity: 0;
-            width: 0;
-        }
-
-        .sidebar.collapsed .nav-item {
-            justify-content: center;
-            padding: 12px 8px;
-        }
-
-        /* Sidebar Footer */
-        .sidebar-footer {
-            padding: 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .sidebar-footer-text {
-            font-size: 11px;
-            color: var(--text-light);
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-        }
-
-        .sidebar.collapsed .sidebar-footer-text {
-            opacity: 0;
-        }
-
-        /* ==================================================================
-           Main Content Area
-           ================================================================== */
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-        }
-
-        /* Header */
-        .header {
-            height: var(--header-height);
-            background: var(--bg-white);
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            padding: 0 24px;
-            gap: 16px;
-        }
-
-        .header-title {
-            font-size: 18px;
-            font-weight: 500;
-            color: var(--text-dark);
-        }
-
-        .header-subtitle {
-            font-size: 13px;
-            color: var(--text-medium);
-        }
-
-        .header-actions {
-            margin-left: auto;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .btn {
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all var(--transition-fast);
-            border: none;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-primary {
-            background: var(--accent-green);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: var(--accent-green-dark);
-        }
-
-        .btn-secondary {
-            background: var(--bg-light);
-            color: var(--text-dark);
-            border: 1px solid var(--border-color);
-        }
-
-        .btn-secondary:hover {
-            background: var(--border-color);
-        }
-
-        /* Status indicator */
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: var(--text-medium);
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--accent-green);
-        }
-
-        /* ==================================================================
-           Content Frame (iframe container)
-           ================================================================== */
-        .content-frame {
-            flex: 1;
-            position: relative;
-            background: var(--bg-light);
-        }
-
-        .content-frame iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            position: absolute;
-            top: 0;
-            left: 0;
-        }
-
-        /* Welcome screen (shown when no app selected) */
-        .welcome-screen {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background: var(--bg-white);
-            padding: 40px;
-        }
-
-        .welcome-screen.hidden {
-            display: none;
-        }
-
-        .welcome-icon {
-            font-size: 64px;
-            margin-bottom: 24px;
-        }
-
-        .welcome-title {
-            font-size: 28px;
-            font-weight: 700;
-            color: var(--primary-blue);
-            margin-bottom: 12px;
-        }
-
-        .welcome-text {
-            font-size: 16px;
-            color: var(--text-medium);
-            text-align: center;
-            max-width: 500px;
-            line-height: 1.6;
-            margin-bottom: 32px;
-        }
-
-        .quick-access {
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-
-        .quick-card {
-            background: var(--bg-light);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 20px;
-            width: 180px;
-            text-align: center;
-            cursor: pointer;
-            transition: all var(--transition-normal);
-        }
-
-        .quick-card:hover {
-            border-color: var(--primary-blue);
-            box-shadow: 0 4px 12px rgba(37, 118, 183, 0.15);
-            transform: translateY(-2px);
-        }
-
-        .quick-card-icon {
-            font-size: 32px;
-            margin-bottom: 12px;
-        }
-
-        .quick-card-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-dark);
-            margin-bottom: 4px;
-        }
-
-        .quick-card-desc {
-            font-size: 12px;
-            color: var(--text-medium);
-        }
-
-        /* Loading indicator */
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: var(--bg-white);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            z-index: 10;
-        }
-
-        .loading-overlay.hidden {
-            display: none;
-        }
-
-        .loading-spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid var(--border-color);
-            border-top-color: var(--primary-blue);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .loading-text {
-            margin-top: 16px;
-            font-size: 14px;
-            color: var(--text-medium);
-        }
-
-        /* ==================================================================
-           Tooltip for collapsed sidebar
-           ================================================================== */
-        .nav-item[data-tooltip] {
-            position: relative;
-        }
-
-        .sidebar.collapsed .nav-item::after {
-            content: attr(data-tooltip);
-            position: absolute;
-            left: 100%;
-            top: 50%;
-            transform: translateY(-50%);
-            background: var(--bg-sidebar);
-            color: var(--text-white);
-            padding: 8px 12px;
-            border-radius: 4px;
-            font-size: 13px;
-            white-space: nowrap;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity var(--transition-fast);
-            margin-left: 8px;
-            z-index: 1000;
-        }
-
-        .sidebar.collapsed .nav-item:hover::after {
-            opacity: 1;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Environment Config -->
+    <script src="env.js"></script>
+    <script>
+        window.ENV_COGNITO_LOGIN_URL = window.ENV_COGNITO_LOGIN_URL || "";
+        window.ENV_COGNITO_CLIENT_ID = window.ENV_COGNITO_CLIENT_ID || "";
+    </script>
 </head>
 
 <body>
-    <div class="app-container">
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-header">
-                <div class="logo-icon">🚀</div>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-container">
+            <div class="logo">
+                <img src="logo.png" alt="Project Pluto" class="logo-icon">
                 <span class="logo-text">Project Pluto</span>
-                <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
-                    <svg class="toggle-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2">
-                        <path d="M15 18l-6-6 6-6" />
-                    </svg>
-                </button>
             </div>
+            <nav class="header-nav">
+                <div id="authStatus" class="auth-status"></div>
+                <button id="authButton" class="btn btn-primary" onclick="handleAuth()">Sign In</button>
+            </nav>
+        </div>
+    </header>
 
-            <div class="sidebar-nav">
-                <div class="nav-section">
-                    <div class="nav-section-title">AI Tools</div>
+    <!-- Main Content -->
+    <main class="main">
+        <!-- Hero Section -->
+        <section class="hero">
+            <img src="logo.png" alt="Project Pluto" class="hero-logo">
+            <h1 class="hero-title">Your AI Development Ecosystem</h1>
+            <p class="hero-subtitle">
+                Build, deploy, and manage AI applications with enterprise-grade tools.
+                <span id="heroAction" class="hero-action">Sign in to get started.</span>
+            </p>
+        </section>
 
-                    <div class="nav-item" data-app="openwebui" data-url="https://openwebui.pluto.local"
-                        data-tooltip="OpenWebUI" onclick="loadApp(this)">
-                        <div class="nav-item-icon">💬</div>
-                        <span class="nav-item-text">OpenWebUI</span>
+        <!-- Tools Grid -->
+        <section class="tools-section">
+            <h2 class="section-title">Platform Tools</h2>
+            <div class="tools-grid">
+                <!-- OpenWebUI -->
+                <article class="tool-card" data-tool="openwebui">
+                    <div class="tool-header">
+                        <span class="tool-icon">💬</span>
+                        <h3 class="tool-name">OpenWebUI</h3>
                     </div>
-
-                    <div class="nav-item" data-app="litellm" data-url="https://litellm.pluto.local/ui"
-                        data-tooltip="LiteLLM" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🔀</div>
-                        <span class="nav-item-text">LiteLLM</span>
-                    </div>
-
-                    <div class="nav-item" data-app="n8n" data-url="https://n8n.pluto.local" data-tooltip="n8n"
-                        onclick="loadApp(this)">
-                        <div class="nav-item-icon">⚡</div>
-                        <span class="nav-item-text">n8n</span>
-                    </div>
-                </div>
-
-
-                <div class="nav-section">
-                    <div class="nav-section-title">MCP Tools</div>
-
-                    <div class="nav-item" data-app="mcp-manager" data-url="https://mcp.pluto.local"
-                        data-tooltip="FastMCP Server" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🐍</div>
-                        <span class="nav-item-text">FastMCP</span>
-                    </div>
-                </div>
-
-
-                <div class="nav-section">
-                    <div class="nav-section-title">Management Tools</div>
-
-                    <div class="nav-item" data-app="pgadmin" data-url="https://pgadmin.pluto.local:8443"
-                        data-tooltip="PostgreSQL UI" onclick="loadApp(this)">
-                        <div class="nav-item-icon">🐘</div>
-                        <span class="nav-item-text">pgAdmin</span>
-                    </div>
-
-
-
-                    <div class="nav-item" data-app="traefik" data-url="https://traefik.pluto.local"
-                        data-tooltip="Traefik Dashboard" onclick="loadApp(this)">
-                        <div class="nav-item-icon">⚙️</div>
-                        <span class="nav-item-text">Traefik</span>
-                    </div>
-
-                    <div class="nav-item" data-app="db" data-tooltip="Connection Info" onclick="showDbInfo()">
-                        <div class="nav-item-icon">ℹ️</div>
-                        <span class="nav-item-text">DB Info</span>
-                    </div>
-                </div>
-
-            </div>
-
-            <div class="sidebar-footer">
-                <div class="sidebar-footer-text">v0.1.0</div>
-            </div>
-        </nav>
-
-        <!-- Main Content -->
-        <main class="main-content">
-            <header class="header">
-                <div>
-                    <div class="header-title" id="headerTitle">Welcome</div>
-                    <div class="header-subtitle" id="headerSubtitle">Select a tool to get started</div>
-                </div>
-                <div class="header-actions">
-                    <div class="status-indicator">
-                        <div class="status-dot"></div>
-                        <span>All services running</span>
-                    </div>
-                    <a href="#" class="btn btn-secondary" onclick="openInNewTab(); return false;">
-                        Open in New Tab ↗
-                    </a>
-                </div>
-            </header>
-
-            <div class="content-frame" id="contentFrame">
-                <!-- Welcome screen -->
-                <div class="welcome-screen" id="welcomeScreen">
-                    <div class="welcome-icon">🚀</div>
-                    <h1 class="welcome-title">Welcome to Project Pluto</h1>
-                    <p class="welcome-text">
-                        Your integrated AI development platform. Select a tool from the sidebar
-                        to get started, or use the quick access cards below.
+                    <p class="tool-description">
+                        Interactive AI chat interface with RAG capabilities, knowledge base management, and multi-model support.
                     </p>
-                    <div class="quick-access">
-                        <div class="quick-card" onclick="loadAppByName('openwebui')">
-                            <div class="quick-card-icon">💬</div>
-                            <div class="quick-card-title">OpenWebUI</div>
-                            <div class="quick-card-desc">Chat with AI</div>
-                        </div>
-                        <div class="quick-card" onclick="loadAppByName('litellm')">
-                            <div class="quick-card-icon">🔀</div>
-                            <div class="quick-card-title">LiteLLM</div>
-                            <div class="quick-card-desc">LLM Proxy</div>
-                        </div>
-                        <div class="quick-card" onclick="loadAppByName('n8n')">
-                            <div class="quick-card-icon">⚡</div>
-                            <div class="quick-card-title">n8n</div>
-                            <div class="quick-card-desc">Workflows</div>
-                        </div>
+                    <ul class="tool-features">
+                        <li>Chat with AI models</li>
+                        <li>Upload documents for RAG</li>
+                        <li>Create custom agents</li>
+                    </ul>
+                    <button class="btn btn-launch" onclick="launchApp('openwebui')" disabled>
+                        <span class="launch-text">Sign in to launch</span>
+                    </button>
+                </article>
+
+                <!-- n8n -->
+                <article class="tool-card" data-tool="n8n">
+                    <div class="tool-header">
+                        <span class="tool-icon">⚡</span>
+                        <h3 class="tool-name">n8n Automation</h3>
                     </div>
-                </div>
+                    <p class="tool-description">
+                        Build powerful workflows that connect your AI applications to hundreds of external services.
+                    </p>
+                    <ul class="tool-features">
+                        <li>Visual workflow builder</li>
+                        <li>500+ integrations</li>
+                        <li>AI agent pipelines</li>
+                    </ul>
+                    <button class="btn btn-launch" onclick="launchApp('n8n')" disabled>
+                        <span class="launch-text">Sign in to launch</span>
+                    </button>
+                </article>
 
-                <!-- Loading indicator -->
-                <div class="loading-overlay hidden" id="loadingOverlay">
-                    <div class="loading-spinner"></div>
-                    <div class="loading-text">Loading...</div>
-                </div>
-
-                <!-- App iframe -->
-                <iframe id="appFrame" style="display: none;"></iframe>
+                <!-- LiteLLM -->
+                <article class="tool-card" data-tool="litellm">
+                    <div class="tool-header">
+                        <span class="tool-icon">🔀</span>
+                        <h3 class="tool-name">LiteLLM Gateway</h3>
+                    </div>
+                    <p class="tool-description">
+                        Unified API gateway for all your AI models. Route requests, track usage, and manage access.
+                    </p>
+                    <ul class="tool-features">
+                        <li>Multi-provider routing</li>
+                        <li>Usage analytics</li>
+                        <li>API key management</li>
+                    </ul>
+                    <button class="btn btn-launch" onclick="launchApp('litellm')" disabled>
+                        <span class="launch-text">Sign in to launch</span>
+                    </button>
+                </article>
             </div>
-        </main>
-    </div>
+        </section>
 
-    <script>
-        // App metadata - iframeBlocked means the app blocks iframe embedding
-        const apps = {
-            openwebui: { name: 'OpenWebUI', subtitle: 'AI Chat Interface', url: 'https://openwebui.pluto.local', iframeBlocked: false },
-            litellm: { name: 'LiteLLM', subtitle: 'LLM Proxy & Monitoring', url: 'https://litellm.pluto.local/ui', iframeBlocked: false },
-            n8n: { name: 'n8n', subtitle: 'Workflow Automation', url: 'https://n8n.pluto.local', iframeBlocked: true },
-            'mcp-manager': { name: 'FastMCP', subtitle: 'Python MCP Server + Inspector', url: 'https://mcp.pluto.local', iframeBlocked: false },
-            pgadmin: { name: 'pgAdmin', subtitle: 'PostgreSQL Manager', url: 'https://pgadmin.pluto.local:8443', iframeBlocked: true },
-            traefik: { name: 'Traefik', subtitle: 'Reverse Proxy Dashboard', url: 'https://traefik.pluto.local:8443', iframeBlocked: false },
-            qdrant: { name: 'Qdrant', subtitle: 'Vector Database', url: 'https://qdrant.pluto.local:8443', iframeBlocked: false }
-        };
+        <!-- Features Section -->
+        <section class="features-section">
+            <h2 class="section-title">Why Project Pluto?</h2>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <span class="feature-icon">🔐</span>
+                    <h4>Enterprise SSO</h4>
+                    <p>Single sign-on across all tools with AWS Cognito.</p>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">☁️</span>
+                    <h4>Cloud Native</h4>
+                    <p>Deployed on AWS with auto-scaling and high availability.</p>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">🔗</span>
+                    <h4>Integrated</h4>
+                    <p>Integrated tools work together seamlessly out of the box.</p>
+                </div>
+                <div class="feature-item">
+                    <span class="feature-icon">🛡️</span>
+                    <h4>Secure</h4>
+                    <p>TLS everywhere, private networking, and audit logging.</p>
+                </div>
+            </div>
+        </section>
+    </main>
 
+    <!-- Footer -->
+    <footer class="footer">
+        <p>© 2026 Project Pluto @ Info-Tech Research Group</p>
+    </footer>
 
-        let currentApp = null;
-
-        // Toggle sidebar expand/collapse
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            sidebar.classList.toggle('collapsed');
-            // Save preference
-            localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
-        }
-
-        // Restore sidebar state on load
-        function restoreSidebarState() {
-            const collapsed = localStorage.getItem('sidebarCollapsed') === 'true';
-            if (collapsed) {
-                document.getElementById('sidebar').classList.add('collapsed');
-            }
-        }
-
-        // Load app in iframe
-        function loadApp(element) {
-            const appName = element.dataset.app;
-            const url = element.dataset.url;
-
-            if (!url || appName === 'db') return;
-
-            loadAppByName(appName);
-        }
-
-        function loadAppByName(appName) {
-            const app = apps[appName];
-            if (!app) return;
-
-            currentApp = appName;
-
-            // Update active state in nav
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.classList.remove('active');
-                if (item.dataset.app === appName) {
-                    item.classList.add('active');
-                }
-            });
-
-            // Update header
-            document.getElementById('headerTitle').textContent = app.name;
-            document.getElementById('headerSubtitle').textContent = app.subtitle;
-
-            // Check if app blocks iframe embedding
-            if (app.iframeBlocked) {
-                // Open in new tab and show message
-                window.open(app.url, '_blank');
-                document.getElementById('welcomeScreen').classList.add('hidden');
-                document.getElementById('loadingOverlay').classList.add('hidden');
-                document.getElementById('appFrame').style.display = 'none';
-                showBlockedMessage(app);
-                return;
-            }
-
-            // Hide blocked message if showing
-            const blockedMsg = document.getElementById('blockedMessage');
-            if (blockedMsg) blockedMsg.classList.add('hidden');
-
-            // Show loading, hide welcome
-            document.getElementById('welcomeScreen').classList.add('hidden');
-            document.getElementById('loadingOverlay').classList.remove('hidden');
-
-            // Load iframe
-            const iframe = document.getElementById('appFrame');
-            iframe.style.display = 'block';
-            iframe.src = app.url;
-
-            // Hide loading when iframe loads
-            iframe.onload = function () {
-                document.getElementById('loadingOverlay').classList.add('hidden');
-            };
-
-            // Timeout fallback for loading indicator
-            setTimeout(() => {
-                document.getElementById('loadingOverlay').classList.add('hidden');
-            }, 5000);
-        }
-
-        // Show message for apps that block iframe embedding
-        function showBlockedMessage(app) {
-            let blockedMsg = document.getElementById('blockedMessage');
-            if (!blockedMsg) {
-                blockedMsg = document.createElement('div');
-                blockedMsg.id = 'blockedMessage';
-                blockedMsg.className = 'welcome-screen';
-                blockedMsg.innerHTML = `
-                    <div class="welcome-icon">🔗</div>
-                    <h1 class="welcome-title" id="blockedAppName"></h1>
-                    <p class="welcome-text" id="blockedAppText"></p>
-                    <button class="btn btn-primary" onclick="openInNewTab()">Open in New Tab ↗</button>
-                `;
-                document.getElementById('contentFrame').appendChild(blockedMsg);
-            }
-            document.getElementById('blockedAppName').textContent = app.name + ' Opened';
-            document.getElementById('blockedAppText').textContent =
-                app.name + ' has been opened in a new browser tab. This app requires its own window for security reasons.';
-            blockedMsg.classList.remove('hidden');
-        }
-
-        // Open current app in new tab
-        function openInNewTab() {
-            if (currentApp && apps[currentApp]) {
-                window.open(apps[currentApp].url, '_blank');
-            }
-        }
-
-        // Show database connection info
-        function showDbInfo() {
-            alert(
-                '🗄️ PostgreSQL Connection\n\n' +
-                'Host: localhost\n' +
-                'Port: 5432\n' +
-                'Databases: litellm, openwebui, n8n\n' +
-                'Username: pluto\n' +
-                'Password: (see .env file)\n\n' +
-                'Use pgAdmin, DBeaver, or TablePlus to connect.'
-            );
-        }
-
-        // Show MCP server info
-        function showMcpInfo(server) {
-            const mcpInfo = {
-                browserbase: {
-                    title: '🌐 BrowserBase MCP',
-                    info: 'Cloud browser automation for AI agents.\n\n' +
-                        'Features:\n' +
-                        '• Navigate web pages\n' +
-                        '• Click elements, fill forms\n' +
-                        '• Extract data from pages\n' +
-                        '• Take screenshots\n\n' +
-                        'Setup Required:\n' +
-                        '1. Sign up at browserbase.com\n' +
-                        '2. Add API keys to .env file:\n' +
-                        '   BROWSERBASE_API_KEY=...\n' +
-                        '   BROWSERBASE_PROJECT_ID=...\n\n' +
-                        'This is an MCP server (no web UI).\n' +
-                        'Use it via AI agents in n8n or custom apps.'
-                },
-                'ddg-mcp': {
-                    title: '🔍 DuckDuckGo MCP',
-                    info: 'Privacy-focused web search for AI agents.\n\n' +
-                        'Features:\n' +
-                        '• DuckDuckGo web search\n' +
-                        '• URL content fetching\n' +
-                        '• Metadata extraction\n' +
-                        '• No API key required!\n\n' +
-                        'Endpoint: https://ddg.pluto.local/mcp\n' +
-                        'Health: https://ddg.pluto.local/healthz'
-                }
-
-            };
-
-            const info = mcpInfo[server];
-            if (info) {
-                alert(info.title + '\n\n' + info.info);
-            }
-        }
-
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function () {
-            restoreSidebarState();
-        });
-    </script>
+    <!-- Logic -->
+    <script src="app.js"></script>
 </body>
 
 </html>
