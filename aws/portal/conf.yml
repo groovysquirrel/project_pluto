@@ -1,0 +1,198 @@
+---
+# =============================================================================
+# Project Pluto - Dashy Dashboard Configuration
+# =============================================================================
+# This configuration defines the landing portal for Project Pluto.
+# It displays all available services with health checks and quick access.
+#
+# Documentation: https://dashy.to/docs
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Page Information
+# -----------------------------------------------------------------------------
+pageInfo:
+  title: Project Pluto
+  description: AI Development Platform
+  navLinks:
+    - title: Documentation
+      path: https://github.com/jstmaurice/project_pluto
+    - title: Account Settings
+      path: ${COGNITO_ACCOUNT_URL:-https://auth.pluto.patternsatscale.com/userInfo}
+  logo: logo.png
+
+# -----------------------------------------------------------------------------
+# App Configuration
+# -----------------------------------------------------------------------------
+appConfig:
+  theme: dark
+  layout: auto
+  iconSize: large
+  language: en
+  startingView: default
+  defaultOpeningMethod: newtab
+  statusCheck: true
+  statusCheckInterval: 60
+
+  # Authentication - Handled by oauth2-proxy
+  # When behind oauth2-proxy, Dashy will detect X-Forwarded-User header
+  auth:
+    enableGuestAccess: false
+
+  # Hide settings and config options for end users
+  hideComponents:
+    hideSettings: true
+    hideFooter: false
+
+  # Custom CSS for branding
+  customCss: |
+    :root {
+      --primary: #3b82f6;
+      --background: #0f172a;
+      --background-darker: #020617;
+    }
+
+# -----------------------------------------------------------------------------
+# Sections & Services
+# -----------------------------------------------------------------------------
+sections:
+  # ===========================================================================
+  # AI TOOLS
+  # ===========================================================================
+  - name: AI Tools
+    icon: fas fa-robot
+    displayData:
+      collapsed: false
+      hideForGuests: false
+    items:
+      # -----------------------------------------------------------------------
+      # OpenWebUI - Chat Interface
+      # -----------------------------------------------------------------------
+      - title: OpenWebUI
+        description: Interactive AI chat interface with RAG capabilities
+        icon: hl-openwebui
+        url: https://openwebui.${PLUTO_DOMAIN:-pluto.local}
+        target: newtab
+        tags: [ai, chat, rag]
+        statusCheck: true
+        statusCheckUrl: https://openwebui.${PLUTO_DOMAIN:-pluto.local}/health
+        statusCheckAllowInsecure: true
+
+      # -----------------------------------------------------------------------
+      # LiteLLM - API Gateway
+      # -----------------------------------------------------------------------
+      - title: LiteLLM Gateway
+        description: Unified API gateway for AWS Bedrock models
+        icon: hl-claude-ai
+        url: https://litellm.${PLUTO_DOMAIN:-pluto.local}/ui
+        target: newtab
+        tags: [ai, api, gateway]
+        statusCheck: true
+        statusCheckUrl: https://litellm.${PLUTO_DOMAIN:-pluto.local}/health
+        statusCheckAllowInsecure: true
+
+  # ===========================================================================
+  # AUTOMATION & DEVELOPMENT
+  # ===========================================================================
+  - name: Automation & Development
+    icon: fas fa-code
+    displayData:
+      collapsed: false
+      hideForGuests: false
+    items:
+      # -----------------------------------------------------------------------
+      # n8n - Workflow Automation
+      # -----------------------------------------------------------------------
+      - title: n8n Workflows
+        description: Visual workflow automation and AI agent pipelines
+        icon: hl-n8n
+        url: https://n8n.${PLUTO_DOMAIN:-pluto.local}
+        target: newtab
+        tags: [automation, workflows, integration]
+        statusCheck: true
+        statusCheckUrl: https://n8n.${PLUTO_DOMAIN:-pluto.local}
+        statusCheckAllowInsecure: true
+
+      # -----------------------------------------------------------------------
+      # FastMCP - VS Code + MCP Server
+      # -----------------------------------------------------------------------
+      - title: FastMCP IDE
+        description: VS Code in browser with Python MCP server for custom tools
+        icon: hl-visual-studio-code
+        url: https://mcp.${PLUTO_DOMAIN:-pluto.local}
+        target: newtab
+        tags: [ide, development, mcp]
+        statusCheck: true
+        statusCheckUrl: https://mcp.${PLUTO_DOMAIN:-pluto.local}
+        statusCheckAllowInsecure: true
+
+  # ===========================================================================
+  # ADMIN TOOLS (Docker only)
+  # ===========================================================================
+  - name: Admin Tools
+    icon: fas fa-tools
+    displayData:
+      collapsed: true
+      hideForGuests: false
+    items:
+      # -----------------------------------------------------------------------
+      # pgAdmin - Database Management
+      # -----------------------------------------------------------------------
+      - title: pgAdmin
+        description: PostgreSQL database administration
+        icon: hl-postgresql
+        url: https://pgadmin.${PLUTO_DOMAIN:-pluto.local}:8443
+        target: newtab
+        tags: [database, admin]
+        statusCheck: false
+
+      # -----------------------------------------------------------------------
+      # Qdrant - Vector Database
+      # -----------------------------------------------------------------------
+      - title: Qdrant Dashboard
+        description: Vector database for RAG embeddings
+        icon: fas fa-database
+        url: https://qdrant.${PLUTO_DOMAIN:-pluto.local}:8443
+        target: newtab
+        tags: [database, vectors, rag]
+        statusCheck: false
+
+      # -----------------------------------------------------------------------
+      # Traefik - Reverse Proxy Dashboard
+      # -----------------------------------------------------------------------
+      - title: Traefik Dashboard
+        description: Reverse proxy and routing configuration
+        icon: hl-traefik
+        url: https://traefik.${PLUTO_DOMAIN:-pluto.local}:8443
+        target: newtab
+        tags: [networking, proxy]
+        statusCheck: false
+
+  # ===========================================================================
+  # ACCOUNT MANAGEMENT
+  # ===========================================================================
+  - name: Account
+    icon: fas fa-user-cog
+    displayData:
+      collapsed: true
+      hideForGuests: false
+    items:
+      # -----------------------------------------------------------------------
+      # Cognito Account Settings
+      # -----------------------------------------------------------------------
+      - title: Account Settings
+        description: Manage your password, profile, and security settings
+        icon: fas fa-id-card
+        url: ${COGNITO_ACCOUNT_URL:-https://auth.pluto.patternsatscale.com/userInfo}
+        target: newtab
+        tags: [account, security]
+
+      # -----------------------------------------------------------------------
+      # Sign Out
+      # -----------------------------------------------------------------------
+      - title: Sign Out
+        description: Log out of all Pluto services
+        icon: fas fa-sign-out-alt
+        url: /oauth2/sign_out
+        target: sametab
+        tags: [account]

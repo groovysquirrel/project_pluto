@@ -66,8 +66,8 @@ resource "aws_cognito_user_pool" "pluto" {
   # Lambda triggers
   lambda_config {
     pre_sign_up       = aws_lambda_function.cognito_presignup.arn
-    # Disabled: Trusted header auto-creation is working, don't need SQS-based provisioning
-    # post_confirmation = aws_lambda_function.cognito_postconfirm.arn
+    # Re-enabled: Using SQS-based provisioning for n8n user invitations
+    post_confirmation = aws_lambda_function.cognito_postconfirm.arn
   }
 
   tags = {
@@ -76,8 +76,8 @@ resource "aws_cognito_user_pool" "pluto" {
 
   # Ensure Lambdas are created first
   depends_on = [
-    aws_lambda_function.cognito_presignup
-    # aws_lambda_function.cognito_postconfirm  # Disabled
+    aws_lambda_function.cognito_presignup,
+    aws_lambda_function.cognito_postconfirm
   ]
 }
 
@@ -314,8 +314,10 @@ resource "aws_lambda_permission" "cognito_presignup" {
 }
 
 # -----------------------------------------------------------------------------
-# COGNITO POST-CONFIRMATION LAMBDA (Auto-invite to n8n)
+# COGNITO POST-CONFIRMATION LAMBDA (Queue n8n invitations)
 # -----------------------------------------------------------------------------
+# Queues new users for n8n invitation via SQS
+# NOTE: OpenWebUI users are auto-created via oauth2-proxy trusted headers
 
 resource "aws_secretsmanager_secret" "n8n_api_key" {
   name                    = "${var.project_name}/n8n_api_key"
@@ -326,14 +328,9 @@ resource "aws_secretsmanager_secret" "n8n_api_key" {
 # Note: After deployment, you must manually set the n8n API key:
 # aws secretsmanager put-secret-value --secret-id pluto/n8n_api_key --secret-string "your-n8n-api-key"
 
-resource "aws_secretsmanager_secret" "openwebui_api_key" {
-  name                    = "${var.project_name}-openwebui-api-key"
-  description             = "OpenWebUI API key for Lambda user provisioning"
-  recovery_window_in_days = 0
-}
-
-# Note: Set the OpenWebUI API key value manually after generating it in OpenWebUI admin panel:
-# aws secretsmanager put-secret-value --secret-id pluto-openwebui-api-key --secret-string "your-jwt-token"
+# NOTE: OpenWebUI users are auto-created via oauth2-proxy trusted headers (X-Forwarded-Email)
+# The Lambda-based user provisioning is only used for n8n invitations
+# OpenWebUI API key secret is not needed
 
 data "archive_file" "cognito_postconfirm" {
   type        = "zip"
@@ -361,24 +358,18 @@ resource "aws_iam_role_policy_attachment" "cognito_postconfirm_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role_policy" "cognito_postconfirm_secrets" {
-  name = "${var.project_name}-postconfirm-secrets"
-  role = aws_iam_role.cognito_postconfirm.id
+# CloudWatch Log Group with retention
+resource "aws_cloudwatch_log_group" "cognito_postconfirm" {
+  name              = "/aws/lambda/${aws_lambda_function.cognito_postconfirm.function_name}"
+  retention_in_days = 14 # Keep logs for 2 weeks
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "secretsmanager:GetSecretValue"
-      ]
-      Resource = [
-        aws_secretsmanager_secret.n8n_api_key.arn,
-        aws_secretsmanager_secret.openwebui_api_key.arn
-      ]
-    }]
-  })
+  tags = {
+    Name = "${var.project_name}-cognito-postconfirm-logs"
+  }
 }
+
+# PostConfirmation Lambda only sends messages to SQS, doesn't need secrets
+# (Secrets are retrieved by the worker Lambda)
 
 resource "aws_lambda_function" "cognito_postconfirm" {
   function_name    = "${var.project_name}-cognito-postconfirm"

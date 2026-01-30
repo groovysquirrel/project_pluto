@@ -1,8 +1,9 @@
 # -----------------------------------------------------------------------------
-# SQS QUEUE FOR USER PROVISIONING
+# SQS QUEUE FOR N8N USER INVITATIONS
 # -----------------------------------------------------------------------------
-# Decouples Cognito user creation from OpenWebUI/n8n API availability.
-# Lambda puts new user info in queue, worker processes asynchronously.
+# Decouples Cognito signup from n8n API availability.
+# PostConfirmation Lambda queues new user info, worker invites to n8n asynchronously.
+# NOTE: OpenWebUI users are auto-created via oauth2-proxy trusted headers (no API call needed)
 
 # Dead Letter Queue - stores messages that fail after max retries
 resource "aws_sqs_queue" "user_provisioning_dlq" {
@@ -53,10 +54,10 @@ resource "aws_iam_role_policy" "cognito_postconfirm_sqs" {
 }
 
 # -----------------------------------------------------------------------------
-# LAMBDA FUNCTION - SQS Worker
+# LAMBDA FUNCTION - N8N Invitation Worker
 # -----------------------------------------------------------------------------
-# Processes user provisioning messages from the queue
-# Creates users in OpenWebUI and invites to n8n
+# Processes n8n invitation messages from the queue
+# NOTE: OpenWebUI users are auto-created via oauth2-proxy trusted headers
 
 data "archive_file" "user_provisioning_worker" {
   type        = "zip"
@@ -86,6 +87,16 @@ resource "aws_iam_role_policy_attachment" "user_provisioning_worker_basic" {
   role       = aws_iam_role.user_provisioning_worker.name
 }
 
+# CloudWatch Log Group with retention
+resource "aws_cloudwatch_log_group" "user_provisioning_worker" {
+  name              = "/aws/lambda/${aws_lambda_function.user_provisioning_worker.function_name}"
+  retention_in_days = 14 # Keep logs for 2 weeks
+
+  tags = {
+    Name = "${var.project_name}-user-provisioning-worker-logs"
+  }
+}
+
 # Allow Lambda to access VPC (required for private DNS resolution)
 resource "aws_iam_role_policy_attachment" "user_provisioning_worker_vpc" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
@@ -113,7 +124,7 @@ resource "aws_iam_role_policy" "user_provisioning_worker_sqs" {
   })
 }
 
-# Allow Lambda to read secrets (OpenWebUI and n8n API keys)
+# Allow Lambda to read n8n API key secret
 resource "aws_iam_role_policy" "user_provisioning_worker_secrets" {
   name = "${var.project_name}-user-provisioning-worker-secrets"
   role = aws_iam_role.user_provisioning_worker.id
@@ -127,7 +138,6 @@ resource "aws_iam_role_policy" "user_provisioning_worker_secrets" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          aws_secretsmanager_secret.openwebui_api_key.arn,
           aws_secretsmanager_secret.n8n_api_key.arn
         ]
       }
@@ -149,10 +159,10 @@ resource "aws_lambda_function" "user_provisioning_worker" {
       # Use DNS-based Service Discovery endpoints (private namespace)
       # These are created by traditional Service Discovery and resolvable from Lambda
       # Different from Service Connect which uses API-only discovery
-      OPENWEBUI_URL            = "http://api.openwebui.pluto.aws:8080"
-      OPENWEBUI_API_KEY_SECRET = aws_secretsmanager_secret.openwebui_api_key.name
-      N8N_URL                  = "http://api.n8n.pluto.aws:5678"
-      N8N_API_KEY_SECRET       = aws_secretsmanager_secret.n8n_api_key.name
+      # NOTE: OpenWebUI users are auto-created via oauth2-proxy trusted headers
+      # This Lambda only invites users to n8n
+      N8N_URL            = "http://api.n8n.pluto.aws:5678"
+      N8N_API_KEY_SECRET = aws_secretsmanager_secret.n8n_api_key.name
     }
   }
 
@@ -176,6 +186,60 @@ resource "aws_lambda_event_source_mapping" "user_provisioning_worker" {
 }
 
 # -----------------------------------------------------------------------------
+# CLOUDWATCH ALARMS - Monitor for failed user provisioning
+# -----------------------------------------------------------------------------
+
+# Alarm when messages appear in DLQ (indicates provisioning failure after all retries)
+resource "aws_cloudwatch_metric_alarm" "user_provisioning_dlq" {
+  alarm_name          = "${var.project_name}-user-provisioning-dlq-alarm"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  namespace           = "AWS/SQS"
+  period              = 60
+  statistic           = "Average"
+  threshold           = 0
+  alarm_description   = "Alert when user provisioning messages fail after all retries and move to DLQ"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    QueueName = aws_sqs_queue.user_provisioning_dlq.name
+  }
+
+  # TODO: Add SNS topic to send email/slack notifications
+  # alarm_actions = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Name = "${var.project_name}-user-provisioning-dlq-alarm"
+  }
+}
+
+# Alarm for Lambda errors (invocation errors, not business logic errors)
+resource "aws_cloudwatch_metric_alarm" "user_provisioning_worker_errors" {
+  alarm_name          = "${var.project_name}-user-provisioning-worker-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "Errors"
+  namespace           = "AWS/Lambda"
+  period              = 300 # 5 minutes
+  statistic           = "Sum"
+  threshold           = 5 # Alert if more than 5 errors in 5 minutes
+  alarm_description   = "Alert when user provisioning worker Lambda has excessive errors"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    FunctionName = aws_lambda_function.user_provisioning_worker.function_name
+  }
+
+  # TODO: Add SNS topic to send email/slack notifications
+  # alarm_actions = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Name = "${var.project_name}-user-provisioning-worker-errors"
+  }
+}
+
+# -----------------------------------------------------------------------------
 # OUTPUTS
 # -----------------------------------------------------------------------------
 
@@ -187,4 +251,12 @@ output "user_provisioning_queue_url" {
 output "user_provisioning_dlq_url" {
   description = "URL of the user provisioning dead letter queue"
   value       = aws_sqs_queue.user_provisioning_dlq.url
+}
+
+output "user_provisioning_alarm_names" {
+  description = "CloudWatch alarm names for user provisioning monitoring"
+  value = {
+    dlq_alarm    = aws_cloudwatch_metric_alarm.user_provisioning_dlq.alarm_name
+    error_alarm  = aws_cloudwatch_metric_alarm.user_provisioning_worker_errors.alarm_name
+  }
 }

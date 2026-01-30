@@ -495,3 +495,109 @@ body::before {
     }
 }
 
+
+/* ==========================================================================
+   Enhanced Authentication & Service Status
+   ========================================================================== */
+
+/* Account Settings Link */
+.account-link {
+    color: var(--color-primary);
+    text-decoration: none;
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    transition: all var(--transition);
+    margin-right: var(--space-3);
+}
+
+.account-link:hover {
+    background: var(--color-primary-light);
+    color: var(--color-primary-hover);
+}
+
+/* Auth Indicator (green dot when logged in) */
+.auth-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+    margin-right: var(--space-2);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Service Status Indicators */
+.service-status {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--color-bg-card);
+    transition: all var(--transition);
+}
+
+.service-status[data-status="healthy"] {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+}
+
+.service-status[data-status="unhealthy"] {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+.service-status[data-status="unknown"] {
+    background: #6b7280;
+    box-shadow: none;
+}
+
+/* Adjust tool card to make room for status indicator */
+.tool-card {
+    position: relative;
+}
+
+/* Loading states for auth buttons */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Smooth transitions for auth state changes */
+.header-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.auth-status {
+    display: flex;
+    align-items: center;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .account-link {
+        padding: var(--space-1) var(--space-2);
+        font-size: var(--font-size-xs);
+    }
+    
+    .service-status {
+        width: 10px;
+        height: 10px;
+        top: var(--space-3);
+        right: var(--space-3);
+    }
+}

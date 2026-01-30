@@ -163,7 +163,7 @@ resource "aws_ecs_task_definition" "portal" {
     # OAuth2-Proxy - handles authentication
     {
       name      = "oauth2-proxy"
-      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.14.2"
+      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
       essential = true
       portMappings = [
         {
@@ -264,7 +264,7 @@ resource "aws_ecs_task_definition" "litellm" {
     # OAuth2-Proxy - handles authentication
     {
       name      = "oauth2-proxy"
-      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.14.2"
+      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
       essential = true
       portMappings = [
         {
@@ -432,7 +432,7 @@ resource "aws_ecs_task_definition" "openwebui" {
     # =========================================================================
     {
       name      = "oauth2-proxy"
-      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.14.2"
+      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
       essential = true
       portMappings = [
         {
@@ -570,10 +570,9 @@ resource "aws_ecs_task_definition" "openwebui" {
         # oauth2-proxy (with PASS_USER_HEADERS=true) sends X-Forwarded-* headers
         # OpenWebUI reads these headers to automatically authenticate users
         #
-        # WORKAROUND for oauth2-proxy bug #3165: X-Forwarded-User contains Cognito sub (GUID)
-        # instead of email, even with USER_ID_CLAIM="email" set. Bug confirmed still exists
-        # in v7.14.2 (Jan 2026). Using X-Forwarded-Email for both fields as workaround.
-        # Users can manually update their display names in OpenWebUI after account creation.
+        # NOTE: Due to oauth2-proxy bug #3165, X-Forwarded-User contains Cognito sub (GUID)
+        # instead of email. Using X-Forwarded-Email for both fields ensures consistent
+        # authentication. Users can update their display names after account creation.
         { name = "WEBUI_AUTH_TRUSTED_EMAIL_HEADER", value = "X-Forwarded-Email" },
         { name = "WEBUI_AUTH_TRUSTED_NAME_HEADER", value = "X-Forwarded-Email" },
 
@@ -608,10 +607,6 @@ resource "aws_ecs_task_definition" "openwebui" {
         # Public URL for OpenWebUI (used for generating links, webhooks, etc.)
         { name = "WEBUI_URL", value = "https://${local.service_hosts.openwebui}" },
 
-        # NOTE: CORS_ALLOW_ORIGIN is intentionally NOT set
-        # Setting it breaks streaming responses from LiteLLM (SSE format)
-        # OpenWebUI default CORS handling works correctly with oauth2-proxy
-
         # ---------------------------------------------------------------------
         # LLM API CONFIGURATION
         # ---------------------------------------------------------------------
@@ -636,8 +631,8 @@ resource "aws_ecs_task_definition" "openwebui" {
         { name = "WEBUI_SECRET_KEY", valueFrom = aws_secretsmanager_secret.webui_secret_key.arn },
         { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.openwebui_database_url.arn },
         { name = "PGVECTOR_DB_URL", valueFrom = aws_secretsmanager_secret.pgvector_database_url.arn },
-        { name = "RAG_OPENAI_API_KEY", valueFrom = aws_secretsmanager_secret.litellm_master_key.arn }
-        # NOTE: SCIM_TOKEN removed - not needed with oauth2-proxy trusted header authentication
+        { name = "RAG_OPENAI_API_KEY", valueFrom = aws_secretsmanager_secret.litellm_master_key.arn },
+        { name = "SCIM_TOKEN", valueFrom = aws_secretsmanager_secret.openwebui_api_key.arn }
       ]
       mountPoints = [
         {
@@ -692,7 +687,7 @@ resource "aws_ecs_task_definition" "n8n" {
     # OAuth2-Proxy - handles authentication
     {
       name      = "oauth2-proxy"
-      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.14.2"
+      image     = "quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
       essential = true
       portMappings = [
         {

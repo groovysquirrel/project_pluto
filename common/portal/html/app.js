@@ -1,6 +1,6 @@
 /**
  * Project Pluto - Portal Application
- * Handles Authentication (Cognito) and Tool Launching
+ * Enhanced with reliable authentication and service status checks
  */
 
 const CONFIG = {
@@ -14,130 +14,223 @@ const CONFIG = {
         openwebui: {
             id: 'openwebui',
             name: 'OpenWebUI',
-            url: window.ENV_APP_OPENWEBUI || 'https://openwebui.pluto.patternsatscale.com'
+            url: window.ENV_APP_OPENWEBUI || 'https://openwebui.pluto.patternsatscale.com',
+            healthUrl: '/health'
         },
         litellm: {
             id: 'litellm',
             name: 'LiteLLM Proxy',
-            url: window.ENV_APP_LITELLM || 'https://litellm.pluto.patternsatscale.com/ui'
+            url: window.ENV_APP_LITELLM || 'https://litellm.pluto.patternsatscale.com/ui',
+            healthUrl: '/health'
         },
         n8n: {
             id: 'n8n',
             name: 'n8n Workflows',
-            url: window.ENV_APP_N8N || 'https://n8n.pluto.patternsatscale.com'
+            url: window.ENV_APP_N8N || 'https://n8n.pluto.patternsatscale.com',
+            healthUrl: '/'
         }
-    }
+    },
+    // Session check interval (30 seconds)
+    sessionCheckInterval: 30000,
+    // Service health check interval (60 seconds)
+    healthCheckInterval: 60000
 };
 
 let user = null;
+let sessionCheckTimer = null;
+let healthCheckTimer = null;
+let isCheckingSession = false;
 
 /**
  * Initialize the application
  */
 async function init() {
+    console.log('[Pluto] Initializing portal...');
+
+    // Handle OAuth callback if present
     handleAuthCallback();
 
-    // ALWAYS check oauth2-proxy session to validate authentication state
-    // This ensures logout from other services is reflected in Portal
+    // Check authentication status
     await checkOAuth2ProxySession();
 
+    // Render UI
     render();
+
+    // Start periodic session checks
+    startSessionMonitoring();
+
+    // Start service health checks (if authenticated)
+    if (user) {
+        startHealthChecks();
+    }
+
+    console.log('[Pluto] Portal initialized');
+}
+
+/**
+ * Start periodic session validation
+ * Checks every 30 seconds to ensure session is still valid
+ */
+function startSessionMonitoring() {
+    // Clear any existing timer
+    if (sessionCheckTimer) {
+        clearInterval(sessionCheckTimer);
+    }
+
+    // Check session periodically
+    sessionCheckTimer = setInterval(async () => {
+        console.log('[Pluto Auth] Periodic session check...');
+        const wasAuthenticated = !!user;
+        await checkOAuth2ProxySession();
+        const isAuthenticated = !!user;
+
+        // If auth state changed, update UI
+        if (wasAuthenticated !== isAuthenticated) {
+            console.log('[Pluto Auth] Session state changed, updating UI');
+            render();
+
+            // Start/stop health checks based on auth state
+            if (isAuthenticated) {
+                startHealthChecks();
+            } else {
+                stopHealthChecks();
+            }
+        }
+    }, CONFIG.sessionCheckInterval);
 }
 
 /**
  * Check if user is authenticated via oauth2-proxy
- * OAuth2-proxy provides /oauth2/userinfo endpoint that returns user info if authenticated
- * This is the source of truth - localStorage is just a cache
+ * This is the source of truth for authentication state
  */
 async function checkOAuth2ProxySession() {
+    // Prevent concurrent checks
+    if (isCheckingSession) {
+        console.log('[Pluto Auth] Session check already in progress, skipping');
+        return;
+    }
+
+    isCheckingSession = true;
+
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
         const response = await fetch('/oauth2/userinfo', {
-            credentials: 'include'
+            credentials: 'include',
+            signal: controller.signal,
+            cache: 'no-cache'
         });
+
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const userInfo = await response.json();
-            console.log('[Pluto Auth] oauth2-proxy userinfo:', JSON.stringify(userInfo, null, 2));
 
             if (userInfo.email) {
-                // Extract display name from various possible Cognito fields
                 const displayName = extractDisplayName(userInfo);
 
-                // Set session from oauth2-proxy user info
+                // Update user object
                 user = {
                     email: userInfo.email,
                     sub: userInfo.sub || userInfo.user || userInfo.email,
-                    name: displayName
+                    name: displayName,
+                    lastCheck: Date.now()
                 };
+
+                // Cache in localStorage
                 localStorage.setItem('pluto_user', JSON.stringify(user));
-                console.log('[Pluto Auth] Session set from oauth2-proxy:', user);
+                console.log('[Pluto Auth] ✓ Authenticated as:', user.email);
+                return true;
             }
+        }
+
+        // Not authenticated or invalid response
+        console.log('[Pluto Auth] ✗ Not authenticated (status:', response.status + ')');
+        clearSession();
+        return false;
+
+    } catch (error) {
+        if (error.name === 'AbortError') {
+            console.error('[Pluto Auth] Session check timed out');
         } else {
-            // Not authenticated - clear any stale localStorage
-            console.log('[Pluto Auth] Not authenticated via oauth2-proxy, clearing local session');
-            localStorage.removeItem('pluto_user');
-            localStorage.removeItem('pluto_id_token');
-            user = null;
+            console.error('[Pluto Auth] Session check failed:', error.message);
+        }
+
+        // On network error, check if we have a recent cached session
+        const cached = checkCachedSession();
+        if (!cached) {
+            clearSession();
+        }
+        return cached;
+
+    } finally {
+        isCheckingSession = false;
+    }
+}
+
+/**
+ * Check if we have a valid cached session (less than 5 minutes old)
+ */
+function checkCachedSession() {
+    try {
+        const storedUser = localStorage.getItem('pluto_user');
+        if (storedUser) {
+            const cachedUser = JSON.parse(storedUser);
+            const age = Date.now() - (cachedUser.lastCheck || 0);
+
+            // Use cache if less than 5 minutes old
+            if (age < 300000) {
+                user = cachedUser;
+                console.log('[Pluto Auth] Using cached session (age:', Math.round(age / 1000), 's)');
+                return true;
+            }
         }
     } catch (e) {
-        console.log('[Pluto Auth] oauth2-proxy check failed:', e.message);
-        // On error, fall back to localStorage but don't clear it
-        checkSession();
+        console.error('[Pluto Auth] Failed to read cached session:', e);
     }
+    return false;
+}
+
+/**
+ * Clear session data
+ */
+function clearSession() {
+    user = null;
+    localStorage.removeItem('pluto_user');
+    localStorage.removeItem('pluto_id_token');
 }
 
 /**
  * Extract display name from various possible Cognito/oauth2-proxy fields
  */
 function extractDisplayName(userInfo) {
-    // Try the 'name' claim first (Cognito standard attribute)
-    if (userInfo.name) return userInfo.name;
-
-    // Try combining given_name and family_name
+    if (userInfo.name && userInfo.name !== userInfo.email) return userInfo.name;
     if (userInfo.given_name || userInfo.family_name) {
         return [userInfo.given_name, userInfo.family_name].filter(Boolean).join(' ');
     }
-
-    // Try preferred_username (Cognito)
     if (userInfo.preferred_username) return userInfo.preferred_username;
     if (userInfo.preferredUsername) return userInfo.preferredUsername;
-
-    // Try cognito:username
     if (userInfo['cognito:username']) return userInfo['cognito:username'];
-
-    // Fallback to email prefix
     return userInfo.email?.split('@')[0] || 'User';
 }
 
-
 /**
- * Handle Auth Callback from Cognito (Implicit Grant)
+ * Handle Auth Callback from Cognito (Legacy - oauth2-proxy handles this now)
  */
 function handleAuthCallback() {
     const hash = window.location.hash;
 
-    // Debug: Log callback detection
-    console.log('[Pluto Auth] Checking for auth callback...');
-    console.log('[Pluto Auth] URL hash:', hash ? hash.substring(0, 100) + '...' : '(empty)');
-
     if (hash && hash.includes('id_token=')) {
-        console.log('[Pluto Auth] ID token found in hash!');
+        console.log('[Pluto Auth] OAuth callback detected');
         const params = new URLSearchParams(hash.substring(1));
         const idToken = params.get('id_token');
-        const accessToken = params.get('access_token');
-
-        console.log('[Pluto Auth] ID token extracted:', idToken ? 'yes' : 'no');
-        console.log('[Pluto Auth] Access token extracted:', accessToken ? 'yes' : 'no');
 
         if (idToken) {
             try {
                 const payload = JSON.parse(atob(idToken.split('.')[1]));
-                console.log('[Pluto Auth] Token payload:', JSON.stringify(payload, null, 2));
-                console.log('[Pluto Auth] Claims - email:', payload.email, 'name:', payload.name, 'sub:', payload.sub);
-                console.log('[Pluto Auth] Identity provider:', payload.identities ? payload.identities[0]?.providerName : 'Cognito native');
-
-                setSession(payload, idToken, accessToken);
-                console.log('[Pluto Auth] Session set successfully!');
+                localStorage.setItem('pluto_id_token', idToken);
+                console.log('[Pluto Auth] Token cached');
 
                 // Clean URL
                 history.replaceState(null, null, window.location.pathname);
@@ -145,41 +238,11 @@ function handleAuthCallback() {
                 console.error('[Pluto Auth] Failed to parse token:', e);
             }
         }
-    } else if (hash && hash.length > 1) {
-        // Log if there's a hash but no id_token (might help diagnose)
-        console.log('[Pluto Auth] Hash present but no id_token. Contents:', hash);
     }
 }
 
 /**
- * Check for existing session
- */
-function checkSession() {
-    const storedUser = localStorage.getItem('pluto_user');
-    if (storedUser) {
-        try {
-            user = JSON.parse(storedUser);
-        } catch (e) {
-            localStorage.removeItem('pluto_user');
-        }
-    }
-}
-
-/**
- * Store session data
- */
-function setSession(userData, idToken, accessToken) {
-    user = {
-        email: userData.email,
-        sub: userData.sub,
-        name: userData.name || userData.email?.split('@')[0] || 'User'
-    };
-    localStorage.setItem('pluto_user', JSON.stringify(user));
-    if (idToken) localStorage.setItem('pluto_id_token', idToken);
-}
-
-/**
- * Handle auth button click (Sign In or Sign Out)
+ * Handle auth button click
  */
 function handleAuth() {
     if (user) {
@@ -193,39 +256,49 @@ function handleAuth() {
  * Trigger Login Flow
  */
 function login() {
-    if (CONFIG.cognito.loginUrl && !CONFIG.cognito.loginUrl.includes('{{')) {
-        window.location.href = CONFIG.cognito.loginUrl;
-    } else {
-        // Dev mode - mock login
-        console.log('Dev mode: Mock login');
-        const mockUser = { email: 'dev@patternsatscale.com', sub: '123', name: 'Developer' };
-        setSession(mockUser, 'mock_token', 'mock_access');
-        render();
+    console.log('[Pluto Auth] Initiating login...');
+
+    // Show loading state
+    const authButton = document.getElementById('authButton');
+    if (authButton) {
+        authButton.disabled = true;
+        authButton.textContent = 'Signing in...';
     }
+
+    // Redirect to oauth2-proxy start flow (which redirects to Cognito)
+    window.location.href = '/oauth2/start?rd=' + encodeURIComponent(window.location.pathname);
 }
 
 /**
  * Logout and clear session
  */
 function logout() {
-    localStorage.removeItem('pluto_user');
-    localStorage.removeItem('pluto_id_token');
-    user = null;
+    console.log('[Pluto Auth] Initiating logout...');
 
-    // Use oauth2-proxy sign_out endpoint which will:
-    // 1. Clear the oauth2-proxy session cookie
-    // 2. Redirect to Cognito logout (via rd parameter)
+    // Show loading state
+    const authButton = document.getElementById('authButton');
+    if (authButton) {
+        authButton.disabled = true;
+        authButton.textContent = 'Signing out...';
+    }
+
+    // Clear local session immediately
+    clearSession();
+
+    // Stop health checks
+    stopHealthChecks();
+
+    // Build logout URL
     const cognitoDomain = CONFIG.cognito.domain;
     const clientId = CONFIG.cognito.clientId;
     const logoutUri = encodeURIComponent(CONFIG.cognito.logoutRedirectUri);
 
     if (cognitoDomain && !cognitoDomain.includes('{{')) {
-        // Build the Cognito logout URL as the redirect destination
+        // Full logout: oauth2-proxy → Cognito → back to portal
         const cognitoLogoutUrl = `https://${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
-        // Use oauth2-proxy sign_out with redirect to Cognito logout
         window.location.href = `/oauth2/sign_out?rd=${encodeURIComponent(cognitoLogoutUrl)}`;
     } else {
-        // Dev mode - just use oauth2-proxy sign_out
+        // Just clear oauth2-proxy session
         window.location.href = '/oauth2/sign_out';
     }
 }
@@ -241,16 +314,29 @@ function render() {
 
     if (user) {
         // Authenticated state
-        authButton.textContent = 'Sign Out';
-        authButton.classList.remove('btn-primary');
-        authButton.classList.add('btn-secondary');
-        authStatus.innerHTML = `Welcome, <span class="user-name">${user.name}</span>`;
-        heroAction.textContent = 'Select a tool below to get started.';
+        if (authButton) {
+            authButton.textContent = 'Sign Out';
+            authButton.disabled = false;
+            authButton.classList.remove('btn-primary');
+            authButton.classList.add('btn-secondary');
+        }
+
+        if (authStatus) {
+            authStatus.innerHTML = `
+                <span class="auth-indicator">●</span>
+                <span class="user-name">${escapeHtml(user.name)}</span>
+            `;
+        }
+
+        if (heroAction) {
+            heroAction.textContent = 'Select a tool below to get started.';
+        }
 
         // Enable launch buttons
         launchButtons.forEach(btn => {
             btn.disabled = false;
-            btn.querySelector('.launch-text').textContent = 'Launch →';
+            const textEl = btn.querySelector('.launch-text');
+            if (textEl) textEl.textContent = 'Launch →';
         });
 
         // Add authenticated class to tool cards
@@ -259,17 +345,27 @@ function render() {
         });
 
     } else {
-        // Public state
-        authButton.textContent = 'Sign In';
-        authButton.classList.add('btn-primary');
-        authButton.classList.remove('btn-secondary');
-        authStatus.innerHTML = '';
-        heroAction.textContent = 'Sign in to get started.';
+        // Not authenticated
+        if (authButton) {
+            authButton.textContent = 'Sign In';
+            authButton.disabled = false;
+            authButton.classList.add('btn-primary');
+            authButton.classList.remove('btn-secondary');
+        }
+
+        if (authStatus) {
+            authStatus.innerHTML = '';
+        }
+
+        if (heroAction) {
+            heroAction.textContent = 'Sign in to get started.';
+        }
 
         // Disable launch buttons
         launchButtons.forEach(btn => {
             btn.disabled = true;
-            btn.querySelector('.launch-text').textContent = 'Sign in to launch';
+            const textEl = btn.querySelector('.launch-text');
+            if (textEl) textEl.textContent = 'Sign in to launch';
         });
 
         // Remove authenticated class
@@ -290,12 +386,124 @@ function launchApp(appId) {
 
     const app = CONFIG.apps[appId];
     if (!app) {
-        console.error('Unknown app:', appId);
+        console.error('[Pluto] Unknown app:', appId);
         return;
     }
 
-    // Open in new tab (each app has oauth2-proxy for seamless SSO)
+    console.log('[Pluto] Launching:', app.name);
     window.open(app.url, '_blank');
+}
+
+/**
+ * Start service health checks
+ */
+function startHealthChecks() {
+    if (!user) return;
+
+    // Initial check
+    checkServiceHealth();
+
+    // Clear any existing timer
+    if (healthCheckTimer) {
+        clearInterval(healthCheckTimer);
+    }
+
+    // Periodic checks
+    healthCheckTimer = setInterval(checkServiceHealth, CONFIG.healthCheckInterval);
+}
+
+/**
+ * Stop service health checks
+ */
+function stopHealthChecks() {
+    if (healthCheckTimer) {
+        clearInterval(healthCheckTimer);
+        healthCheckTimer = null;
+    }
+
+    // Clear all status indicators
+    Object.keys(CONFIG.apps).forEach(appId => {
+        updateServiceStatus(appId, 'unknown');
+    });
+}
+
+/**
+ * Check health of all services
+ */
+async function checkServiceHealth() {
+    if (!user) return;
+
+    console.log('[Pluto Health] Checking service status...');
+
+    for (const [appId, app] of Object.entries(CONFIG.apps)) {
+        checkSingleService(appId, app);
+    }
+}
+
+/**
+ * Check health of a single service
+ */
+async function checkSingleService(appId, app) {
+    try {
+        const healthUrl = app.url.replace(/\/ui$/, '') + app.healthUrl;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(healthUrl, {
+            method: 'HEAD',
+            mode: 'no-cors', // Avoid CORS issues
+            signal: controller.signal,
+            cache: 'no-cache'
+        });
+
+        clearTimeout(timeoutId);
+
+        // With no-cors, we can't read the response, but if it doesn't error, service is up
+        updateServiceStatus(appId, 'healthy');
+
+    } catch (error) {
+        // Service is down or unreachable
+        updateServiceStatus(appId, 'unhealthy');
+    }
+}
+
+/**
+ * Update service status indicator
+ */
+function updateServiceStatus(appId, status) {
+    const card = document.querySelector(`[data-tool="${appId}"]`);
+    if (!card) return;
+
+    // Remove existing status classes
+    card.classList.remove('status-healthy', 'status-unhealthy', 'status-unknown');
+
+    // Add new status class
+    card.classList.add(`status-${status}`);
+
+    // Update or create status indicator
+    let indicator = card.querySelector('.service-status');
+    if (!indicator) {
+        indicator = document.createElement('div');
+        indicator.className = 'service-status';
+        card.querySelector('.tool-header').appendChild(indicator);
+    }
+
+    indicator.setAttribute('data-status', status);
+    indicator.setAttribute('title',
+        status === 'healthy' ? 'Service is running' :
+        status === 'unhealthy' ? 'Service is down' :
+        'Status unknown'
+    );
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Global exports for onclick handlers
@@ -303,6 +511,12 @@ window.handleAuth = handleAuth;
 window.login = login;
 window.logout = logout;
 window.launchApp = launchApp;
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (sessionCheckTimer) clearInterval(sessionCheckTimer);
+    if (healthCheckTimer) clearInterval(healthCheckTimer);
+});
 
 // Boot
 document.addEventListener('DOMContentLoaded', init);

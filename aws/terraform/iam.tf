@@ -38,8 +38,8 @@ resource "aws_iam_role_policy" "ecs_secrets" {
           aws_secretsmanager_secret.db_password.arn,
           aws_secretsmanager_secret.cognito_client_secret.arn,
           aws_secretsmanager_secret.n8n_encryption_key.arn,
-          aws_secretsmanager_secret.oauth2_proxy_cookie_secret.arn,
-          aws_secretsmanager_secret.openwebui_api_key.arn
+          aws_secretsmanager_secret.oauth2_proxy_cookie_secret.arn
+          # NOTE: openwebui_api_key removed - not needed with oauth2-proxy trusted header authentication
         ]
       }
     ]

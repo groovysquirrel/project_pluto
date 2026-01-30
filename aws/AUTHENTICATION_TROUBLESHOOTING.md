@@ -138,6 +138,13 @@ The `WEBUI_AUTH` environment variable behaves differently depending on how it's 
    - Adds complexity without benefit
    - Don't add unless proven necessary
 
+4. **CORS_ALLOW_ORIGIN** ❌❌❌
+   - **CRITICAL:** Breaks streaming responses from LiteLLM
+   - Causes "Unexpected token 'd', "data: {"id"..." errors
+   - Streaming uses SSE (Server-Sent Events) format which conflicts with CORS restrictions
+   - OpenWebUI's default CORS handling works correctly without explicit setting
+   - **DO NOT SET THIS VARIABLE** - let OpenWebUI handle CORS automatically
+
 **The Golden Rule:**
 Start with TD 40 config and only add settings that are PROVEN to work. Don't add "might help" settings - they usually break things. Configuration drift happens when we keep adding settings trying to fix problems.
 
@@ -489,6 +496,131 @@ After confirming the simple synchronous approach works reliably for normal opera
 
 ---
 
-**Date:** 2026-01-29
-**Last Tested Working Config:** Task Definition 60 + Lambda-based user creation
-**Current Status:** Existing users work ✅ | New users via Lambda (testing after deploy)
+## FINAL WORKING SOLUTION (January 30, 2026) 🎉
+
+### The Problem: GUID Usernames
+
+After extensive debugging, we discovered users were being created with Cognito `sub` (GUID) as their display name instead of their actual name or email. This caused authentication failures for users with real names in the database.
+
+**Symptoms:**
+- Users with `name = GUID` (e.g., `ec6df508-40e1-70e3...`) could authenticate ✅
+- Users with `name = "Real Name"` could NOT authenticate ❌
+- Database showed all users had `username = NULL`
+
+**Root Cause:** oauth2-proxy bug #3165
+
+oauth2-proxy v7.6.0 and v7.14.2 both have a bug where the `OAUTH2_PROXY_USER_ID_CLAIM` setting is ignored. Even when set to `"email"`, oauth2-proxy sends the Cognito `sub` claim (GUID) in the `X-Forwarded-User` header instead of the email address.
+
+**Discovery Process:**
+1. Tested with `USER_ID_CLAIM = "email"` - still got GUIDs
+2. Upgraded from v7.6.0 to v7.14.2 - bug persists
+3. Created new test user - confirmed `name` field in database contained GUID
+4. Researched and found [oauth2-proxy issue #3165](https://github.com/oauth2-proxy/oauth2-proxy/issues/3165)
+
+### The Workaround (CURRENT SOLUTION)
+
+Use `X-Forwarded-Email` for BOTH the email and name headers:
+
+**OpenWebUI Configuration (ecs.tf):**
+```terraform
+{ name = "WEBUI_AUTH_TRUSTED_EMAIL_HEADER", value = "X-Forwarded-Email" },
+{ name = "WEBUI_AUTH_TRUSTED_NAME_HEADER", value = "X-Forwarded-Email" },
+```
+
+**Why this works:**
+- `X-Forwarded-Email` reliably contains the user's email address
+- OpenWebUI uses the NAME header value for both authentication matching AND display name
+- Since both are set to email, authentication works consistently
+- Users see their email as display name (acceptable - they can change it manually)
+
+**oauth2-proxy Configuration:**
+```terraform
+image = "quay.io/oauth2-proxy/oauth2-proxy:v7.14.2"
+environment:
+  OAUTH2_PROXY_USER_ID_CLAIM: "email"  # Still set (for future bug fix)
+  OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+  OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+```
+
+**OpenWebUI Configuration:**
+```terraform
+WEBUI_AUTH: "true"
+WEBUI_AUTH_TRUSTED_HEADER: "true"
+WEBUI_AUTH_TYPE: "trusted-header"
+SCIM_ENABLED: "true"
+
+# Auto-creation disabled - not needed with trusted headers
+# ENABLE_SIGNUP: commented out
+# ENABLE_LOGIN_FORM: commented out
+# ENABLE_OAUTH_SIGNUP: commented out
+# DEFAULT_USER_ROLE: commented out
+```
+
+**Cognito PostConfirmation Lambda:** Disabled (trusted header auto-creation works reliably)
+
+### Testing Results
+
+**Task Definition 81+ (January 30, 2026):**
+- oauth2-proxy v7.14.2
+- Workaround active (X-Forwarded-Email for both headers)
+- Cognito PostConfirmation Lambda disabled
+- Auto-creation via trusted headers: ✅ WORKS
+- Authentication for all users: ✅ WORKS
+- Display name shows email: ✅ Acceptable (users can change)
+
+**Database Results:**
+```sql
+SELECT id, email, name, username FROM "user" ORDER BY created_at DESC LIMIT 1;
+```
+```
+id                                   | email                     | name                      | username
+-------------------------------------|---------------------------|---------------------------|---------
+3c494aee-5c64-46ee-85cd-92086b225d21 | test@example.com          | test@example.com          | NULL
+```
+
+### Key Learnings
+
+1. **oauth2-proxy USER_ID_CLAIM bug is real and persists through v7.14.2**
+   - Setting `USER_ID_CLAIM` to "email" does not work
+   - `X-Forwarded-User` always contains the `sub` (GUID) claim
+   - Workaround: Use `X-Forwarded-Email` for name header instead
+
+2. **OpenWebUI uses NAME header for two purposes:**
+   - Authentication matching (finding user in database)
+   - Display name (what shows in UI)
+   - This dual purpose caused the GUID display issue
+
+3. **username field in database is always NULL with trusted headers**
+   - OpenWebUI doesn't populate this field during auto-creation
+   - Authentication relies on the `name` field instead
+
+4. **Trusted header auto-creation is reliable when configured correctly**
+   - No need for Lambda-based user provisioning
+   - No need for SCIM API calls
+   - Simpler architecture, fewer moving parts
+
+5. **ENABLE_SIGNUP and related settings should be disabled**
+   - Causes confusion and dual-creation paths
+   - Trusted header auth handles everything automatically
+   - Cleaner configuration
+
+### Future Improvements
+
+1. **Monitor oauth2-proxy bug #3165** for fix
+   - Once fixed, can revert to using `X-Forwarded-User` with real names
+   - Users would see their actual names instead of email addresses
+
+2. **Consider alpha config format for oauth2-proxy**
+   - Use `injectRequestHeaders` to directly map email claim to X-Forwarded-User
+   - More complex but guaranteed to work
+   - Requires YAML config file instead of environment variables
+
+3. **Add user profile completion flow**
+   - Prompt new users to update their display name
+   - Provides better UX than showing email as name
+
+---
+
+**Date:** 2026-01-30
+**Last Tested Working Config:** Task Definition 81+ (oauth2-proxy v7.14.2 + workaround)
+**Current Status:** Trusted header auto-creation ✅ | All authentication working ✅ | Display shows email (workaround active)
