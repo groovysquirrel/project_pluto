@@ -521,7 +521,7 @@ services:
   # demonstrates how AI agents can orchestrate complex tasks.
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:2.4.4
+    image: docker.io/n8nio/n8n:latest
     container_name: app-n8n
     restart: unless-stopped
     security_opt:

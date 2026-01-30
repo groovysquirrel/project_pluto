@@ -34,11 +34,81 @@ let user = null;
 /**
  * Initialize the application
  */
-function init() {
+async function init() {
     handleAuthCallback();
-    checkSession();
+
+    // ALWAYS check oauth2-proxy session to validate authentication state
+    // This ensures logout from other services is reflected in Portal
+    await checkOAuth2ProxySession();
+
     render();
 }
+
+/**
+ * Check if user is authenticated via oauth2-proxy
+ * OAuth2-proxy provides /oauth2/userinfo endpoint that returns user info if authenticated
+ * This is the source of truth - localStorage is just a cache
+ */
+async function checkOAuth2ProxySession() {
+    try {
+        const response = await fetch('/oauth2/userinfo', {
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const userInfo = await response.json();
+            console.log('[Pluto Auth] oauth2-proxy userinfo:', JSON.stringify(userInfo, null, 2));
+
+            if (userInfo.email) {
+                // Extract display name from various possible Cognito fields
+                const displayName = extractDisplayName(userInfo);
+
+                // Set session from oauth2-proxy user info
+                user = {
+                    email: userInfo.email,
+                    sub: userInfo.sub || userInfo.user || userInfo.email,
+                    name: displayName
+                };
+                localStorage.setItem('pluto_user', JSON.stringify(user));
+                console.log('[Pluto Auth] Session set from oauth2-proxy:', user);
+            }
+        } else {
+            // Not authenticated - clear any stale localStorage
+            console.log('[Pluto Auth] Not authenticated via oauth2-proxy, clearing local session');
+            localStorage.removeItem('pluto_user');
+            localStorage.removeItem('pluto_id_token');
+            user = null;
+        }
+    } catch (e) {
+        console.log('[Pluto Auth] oauth2-proxy check failed:', e.message);
+        // On error, fall back to localStorage but don't clear it
+        checkSession();
+    }
+}
+
+/**
+ * Extract display name from various possible Cognito/oauth2-proxy fields
+ */
+function extractDisplayName(userInfo) {
+    // Try the 'name' claim first (Cognito standard attribute)
+    if (userInfo.name) return userInfo.name;
+
+    // Try combining given_name and family_name
+    if (userInfo.given_name || userInfo.family_name) {
+        return [userInfo.given_name, userInfo.family_name].filter(Boolean).join(' ');
+    }
+
+    // Try preferred_username (Cognito)
+    if (userInfo.preferred_username) return userInfo.preferred_username;
+    if (userInfo.preferredUsername) return userInfo.preferredUsername;
+
+    // Try cognito:username
+    if (userInfo['cognito:username']) return userInfo['cognito:username'];
+
+    // Fallback to email prefix
+    return userInfo.email?.split('@')[0] || 'User';
+}
+
 
 /**
  * Handle Auth Callback from Cognito (Implicit Grant)
@@ -142,15 +212,21 @@ function logout() {
     localStorage.removeItem('pluto_id_token');
     user = null;
 
+    // Use oauth2-proxy sign_out endpoint which will:
+    // 1. Clear the oauth2-proxy session cookie
+    // 2. Redirect to Cognito logout (via rd parameter)
     const cognitoDomain = CONFIG.cognito.domain;
     const clientId = CONFIG.cognito.clientId;
     const logoutUri = encodeURIComponent(CONFIG.cognito.logoutRedirectUri);
 
     if (cognitoDomain && !cognitoDomain.includes('{{')) {
-        const logoutUrl = `https://${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
-        window.location.href = logoutUrl;
+        // Build the Cognito logout URL as the redirect destination
+        const cognitoLogoutUrl = `https://${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
+        // Use oauth2-proxy sign_out with redirect to Cognito logout
+        window.location.href = `/oauth2/sign_out?rd=${encodeURIComponent(cognitoLogoutUrl)}`;
     } else {
-        render();
+        // Dev mode - just use oauth2-proxy sign_out
+        window.location.href = '/oauth2/sign_out';
     }
 }
 

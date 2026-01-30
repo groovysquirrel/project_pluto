@@ -340,7 +340,7 @@ EOF
     crane copy --platform linux/amd64 ghcr.io/berriai/litellm:main-latest "${LITELLM_REPO}:${IMAGE_TAG}"
 
     print_info "Copying n8n..."
-    crane copy --platform linux/amd64 docker.n8n.io/n8nio/n8n:2.4.4 "${N8N_REPO}:${IMAGE_TAG}"
+    crane copy --platform linux/amd64 docker.io/n8nio/n8n:latest "${N8N_REPO}:${IMAGE_TAG}"
 
     # Push Portal (built locally)
     print_info "Pushing Portal image..."
@@ -360,7 +360,7 @@ print_header "STEP 6: Refreshing ECS Services"
 
 ECS_CLUSTER=$(terraform -chdir="$TF_DIR" output -raw ecs_cluster_name)
 
-for SERVICE in portal litellm openwebui n8n; do
+for SERVICE in portal litellm openwebui n8n auth-proxy; do
     print_info "Refreshing ${SERVICE}..."
     if aws ecs update-service \
         --cluster "$ECS_CLUSTER" \
@@ -396,6 +396,9 @@ urls = json.load(sys.stdin)
 for name, url in urls.items():
     print(f'  {name}: {url}')
 "
+
+echo ""
+print_info "Auth Proxy: Centralized authentication service routing all traffic"
 
 echo ""
 print_success "Deployment finished! Services may take a few minutes to become healthy."

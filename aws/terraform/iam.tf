@@ -34,10 +34,12 @@ resource "aws_iam_role_policy" "ecs_secrets" {
           aws_secretsmanager_secret.webui_secret_key.arn,
           aws_secretsmanager_secret.openwebui_database_url.arn,
           aws_secretsmanager_secret.litellm_database_url.arn,
+          aws_secretsmanager_secret.pgvector_database_url.arn,
           aws_secretsmanager_secret.db_password.arn,
           aws_secretsmanager_secret.cognito_client_secret.arn,
           aws_secretsmanager_secret.n8n_encryption_key.arn,
-          aws_secretsmanager_secret.oauth2_proxy_cookie_secret.arn
+          aws_secretsmanager_secret.oauth2_proxy_cookie_secret.arn,
+          aws_secretsmanager_secret.openwebui_api_key.arn
         ]
       }
     ]
@@ -78,30 +80,6 @@ resource "aws_iam_policy" "bedrock" {
 resource "aws_iam_role_policy_attachment" "ecs_task_bedrock" {
   role       = aws_iam_role.ecs_task.name
   policy_arn = aws_iam_policy.bedrock.arn
-}
-
-# OpenSearch Serverless access
-resource "aws_iam_policy" "opensearch" {
-  name        = "${var.project_name}-opensearch"
-  description = "Allow OpenWebUI to access OpenSearch Serverless"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = [
-          "aoss:APIAccessAll"
-        ]
-        Resource = aws_opensearchserverless_collection.pluto.arn
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_opensearch" {
-  role       = aws_iam_role.ecs_task.name
-  policy_arn = aws_iam_policy.opensearch.arn
 }
 
 # EFS access

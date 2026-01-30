@@ -1,26 +1,26 @@
 /**
- * Project Pluto Portal - Dark Neural Theme
- * A modern, dark design inspired by AI neural networks
+ * Project Pluto Portal - Light Theme
+ * A clean, modern design with purple accents
  */
 
 /* ==========================================================================
    CSS Variables
    ========================================================================== */
 :root {
-    /* Colors - Dark Neural Theme */
-    --color-bg: #0d0d1a;
-    --color-bg-subtle: #141428;
-    --color-bg-card: rgba(26, 26, 46, 0.8);
-    --color-text: #e8e8f0;
-    --color-text-secondary: #9d9db8;
-    --color-text-muted: #6b6b8a;
-    --color-primary: #4fd1c5;
-    --color-primary-hover: #38b2ac;
-    --color-primary-light: rgba(79, 209, 197, 0.15);
-    --color-border: rgba(139, 92, 246, 0.3);
-    --color-border-light: rgba(139, 92, 246, 0.15);
-    --color-success: #4fd1c5;
-    --color-card: rgba(26, 26, 46, 0.9);
+    /* Colors - Light Theme with Purple Accents */
+    --color-bg: #ffffff;
+    --color-bg-subtle: #f8f9fc;
+    --color-bg-card: rgba(255, 255, 255, 0.95);
+    --color-text: #1a1a2e;
+    --color-text-secondary: #4a4a68;
+    --color-text-muted: #8888a0;
+    --color-primary: #8b5cf6;
+    --color-primary-hover: #7c3aed;
+    --color-primary-light: rgba(139, 92, 246, 0.1);
+    --color-border: rgba(139, 92, 246, 0.25);
+    --color-border-light: rgba(139, 92, 246, 0.12);
+    --color-success: #10b981;
+    --color-card: rgba(255, 255, 255, 0.98);
     --color-accent-purple: #8b5cf6;
     --color-accent-orange: #f59e6b;
     --color-accent-pink: #ec4899;
@@ -83,10 +83,6 @@ body {
     line-height: 1.6;
     color: var(--color-text);
     background: var(--color-bg);
-    background-image: url('background.jpg');
-    background-size: cover;
-    background-position: center;
-    background-attachment: fixed;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -101,7 +97,7 @@ body::before {
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(135deg, rgba(13, 13, 26, 0.92) 0%, rgba(20, 20, 40, 0.88) 100%);
+    background: linear-gradient(135deg, rgba(248, 249, 252, 0.95) 0%, rgba(255, 255, 255, 0.98) 100%);
     z-index: -1;
 }
 
@@ -112,7 +108,7 @@ body::before {
     position: sticky;
     top: 0;
     z-index: 100;
-    background: rgba(13, 13, 26, 0.95);
+    background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--color-border);
     height: var(--header-height);
@@ -191,24 +187,24 @@ body::before {
 
 .btn-primary {
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent-purple) 100%);
-    color: #0d0d1a;
+    color: #ffffff;
     font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled) {
-    background: linear-gradient(135deg, var(--color-primary-hover) 0%, #7c3aed 100%);
+    background: linear-gradient(135deg, var(--color-primary-hover) 0%, #6d28d9 100%);
     transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(79, 209, 197, 0.4);
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
 }
 
 .btn-secondary {
-    background: rgba(139, 92, 246, 0.15);
+    background: rgba(139, 92, 246, 0.08);
     color: var(--color-text);
     border: 1px solid var(--color-border);
 }
 
 .btn-secondary:hover:not(:disabled) {
-    background: rgba(139, 92, 246, 0.25);
+    background: rgba(139, 92, 246, 0.15);
     border-color: var(--color-accent-purple);
 }
 
@@ -222,15 +218,15 @@ body::before {
 
 .btn-launch:hover:not(:disabled) {
     background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent-purple) 100%);
-    color: #0d0d1a;
+    color: #ffffff;
     border-color: transparent;
-    box-shadow: 0 4px 20px rgba(79, 209, 197, 0.3);
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
 }
 
 .btn-launch:disabled {
-    background: rgba(26, 26, 46, 0.5);
+    background: rgba(139, 92, 246, 0.05);
     color: var(--color-text-muted);
-    border-color: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.15);
 }
 
 /* ==========================================================================
@@ -250,13 +246,6 @@ body::before {
 .hero {
     text-align: center;
     padding: var(--space-12) 0;
-}
-
-.hero-logo {
-    width: 180px;
-    height: 180px;
-    margin: 0 auto var(--space-8);
-    filter: drop-shadow(0 0 30px rgba(79, 209, 197, 0.3));
 }
 
 .hero-title {
@@ -311,7 +300,7 @@ body::before {
     border-radius: var(--radius-xl);
     padding: var(--space-6);
     transition: all var(--transition);
-    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(139, 92, 246, 0.06);
     position: relative;
     overflow: hidden;
 }
@@ -322,7 +311,7 @@ body::before {
     top: 0;
     left: 0;
     right: 0;
-    height: 2px;
+    height: 3px;
     background: linear-gradient(90deg, var(--color-primary), var(--color-accent-purple), var(--color-accent-orange));
     opacity: 0;
     transition: opacity var(--transition);
@@ -330,7 +319,7 @@ body::before {
 
 .tool-card:hover {
     border-color: var(--color-accent-purple);
-    box-shadow: 0 8px 32px rgba(139, 92, 246, 0.2);
+    box-shadow: 0 8px 32px rgba(139, 92, 246, 0.15);
     transform: translateY(-4px);
 }
 
@@ -391,8 +380,7 @@ body::before {
    ========================================================================== */
 .features-section {
     padding: var(--space-12) 0;
-    background: rgba(20, 20, 40, 0.6);
-    backdrop-filter: blur(10px);
+    background: rgba(139, 92, 246, 0.03);
     margin: var(--space-8) calc(-1 * var(--space-6));
     padding-left: var(--space-6);
     padding-right: var(--space-6);
@@ -440,7 +428,7 @@ body::before {
     color: var(--color-text-muted);
     font-size: var(--font-size-sm);
     border-top: 1px solid var(--color-border-light);
-    background: rgba(13, 13, 26, 0.8);
+    background: rgba(248, 249, 252, 0.95);
 }
 
 /* ==========================================================================
@@ -507,16 +495,3 @@ body::before {
     }
 }
 
-/* Subtle animated neural network background effect */
-@keyframes float {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-10px);
-    }
-}
-
-.hero-logo {
-    animation: float 6s ease-in-out infinite;
-}

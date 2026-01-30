@@ -42,19 +42,12 @@ resource "aws_security_group" "alb" {
 }
 
 # ECS Security Group (Private-ish)
+# IMPORTANT: All ingress rules are managed via separate aws_security_group_rule resources below.
+# Do NOT add inline ingress blocks here - they conflict with external rule management.
 resource "aws_security_group" "ecs" {
   name_prefix = "${var.project_name}-ecs-"
   description = "ECS tasks access"
   vpc_id      = aws_vpc.pluto.id
-
-  # Allow traffic from ALB on all service ports
-  ingress {
-    description     = "Access from ALB"
-    from_port       = 0
-    to_port         = 65535
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-  }
 
   egress {
     from_port   = 0
@@ -72,15 +65,67 @@ resource "aws_security_group" "ecs" {
   }
 }
 
-# Allow container-to-container communication within ECS task (for localhost communication)
-resource "aws_security_group_rule" "ecs_self" {
+# Allow ALB to reach oauth2-proxy on port 4180
+resource "aws_security_group_rule" "alb_to_auth_proxy" {
   type                     = "ingress"
-  from_port                = 0
-  to_port                  = 65535
+  from_port                = 4180
+  to_port                  = 4180
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.alb.id
+  description              = "Auth-proxy from ALB"
+}
+
+# Allow container-to-container communication within ECS on specific service ports only
+# Portal: 80, LiteLLM: 4000, OpenWebUI: 8080, n8n: 5678, auth-proxy: 4180
+resource "aws_security_group_rule" "ecs_portal" {
+  type                     = "ingress"
+  from_port                = 80
+  to_port                  = 80
   protocol                 = "tcp"
   security_group_id        = aws_security_group.ecs.id
   source_security_group_id = aws_security_group.ecs.id
-  description              = "Allow inter-container communication"
+  description              = "Portal (nginx) from ECS"
+}
+
+resource "aws_security_group_rule" "ecs_litellm" {
+  type                     = "ingress"
+  from_port                = 4000
+  to_port                  = 4000
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.ecs.id
+  description              = "LiteLLM API from ECS"
+}
+
+resource "aws_security_group_rule" "ecs_auth_proxy" {
+  type                     = "ingress"
+  from_port                = 4180
+  to_port                  = 4180
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.ecs.id
+  description              = "Auth-proxy from ECS"
+}
+
+resource "aws_security_group_rule" "ecs_n8n" {
+  type                     = "ingress"
+  from_port                = 5678
+  to_port                  = 5678
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.ecs.id
+  description              = "n8n from ECS"
+}
+
+resource "aws_security_group_rule" "ecs_openwebui" {
+  type                     = "ingress"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.ecs.id
+  source_security_group_id = aws_security_group.ecs.id
+  description              = "OpenWebUI from ECS"
 }
 
 # RDS Security Group

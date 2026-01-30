@@ -63,17 +63,22 @@ resource "aws_cognito_user_pool" "pluto" {
     }
   }
 
-  # Lambda triggers for email domain restriction
+  # Lambda triggers
   lambda_config {
-    pre_sign_up = aws_lambda_function.cognito_presignup.arn
+    pre_sign_up       = aws_lambda_function.cognito_presignup.arn
+    # Disabled: Trusted header auto-creation is working, don't need SQS-based provisioning
+    # post_confirmation = aws_lambda_function.cognito_postconfirm.arn
   }
 
   tags = {
     Name = "${var.project_name}-user-pool"
   }
 
-  # Ensure Lambda is created first
-  depends_on = [aws_lambda_function.cognito_presignup]
+  # Ensure Lambdas are created first
+  depends_on = [
+    aws_lambda_function.cognito_presignup
+    # aws_lambda_function.cognito_postconfirm  # Disabled
+  ]
 }
 
 # -----------------------------------------------------------------------------
@@ -206,15 +211,18 @@ resource "aws_cognito_user_pool_client" "alb" {
   # Callback URLs for each service + generic
   # IMPORTANT: the /oauth2/idpresponse path is required by ALB for token exchange
   callback_urls = [
-    # ALB Cognito authentication callbacks (kept for portal)
-    "https://${local.domain_root}/oauth2/idpresponse",
-    # Portal redirect
+    # Root domain redirect for Portal implicit flow
     "https://${local.domain_root}/",
-    # OpenWebUI native OIDC callback
-    "https://${local.service_hosts.openwebui}/oauth/oidc/callback",
-    # oauth2-proxy callbacks for LiteLLM and n8n
+    # ALB Cognito authentication callbacks
+    "https://${local.domain_root}/oauth2/idpresponse",
+    # oauth2-proxy callback for Portal
+    "https://${local.domain_root}/oauth2/callback",
+    # oauth2-proxy callbacks for OpenWebUI, LiteLLM and n8n
+    "https://${local.service_hosts.openwebui}/oauth2/callback",
     "https://${local.service_hosts.litellm}/oauth2/callback",
-    "https://${local.service_hosts.n8n}/oauth2/callback"
+    "https://${local.service_hosts.n8n}/oauth2/callback",
+    # LiteLLM native SSO callback
+    "https://${local.service_hosts.litellm}/sso/callback"
   ]
 
   logout_urls = [
@@ -301,6 +309,101 @@ resource "aws_lambda_permission" "cognito_presignup" {
   statement_id  = "AllowCognitoInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.cognito_presignup.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.pluto.arn
+}
+
+# -----------------------------------------------------------------------------
+# COGNITO POST-CONFIRMATION LAMBDA (Auto-invite to n8n)
+# -----------------------------------------------------------------------------
+
+resource "aws_secretsmanager_secret" "n8n_api_key" {
+  name                    = "${var.project_name}/n8n_api_key"
+  description             = "n8n API key for auto-inviting users"
+  recovery_window_in_days = 0
+}
+
+# Note: After deployment, you must manually set the n8n API key:
+# aws secretsmanager put-secret-value --secret-id pluto/n8n_api_key --secret-string "your-n8n-api-key"
+
+resource "aws_secretsmanager_secret" "openwebui_api_key" {
+  name                    = "${var.project_name}-openwebui-api-key"
+  description             = "OpenWebUI API key for Lambda user provisioning"
+  recovery_window_in_days = 0
+}
+
+# Note: Set the OpenWebUI API key value manually after generating it in OpenWebUI admin panel:
+# aws secretsmanager put-secret-value --secret-id pluto-openwebui-api-key --secret-string "your-jwt-token"
+
+data "archive_file" "cognito_postconfirm" {
+  type        = "zip"
+  source_dir  = "${path.module}/../lambda/cognito_postconfirm"
+  output_path = "${path.module}/../lambda/cognito_postconfirm.zip"
+}
+
+resource "aws_iam_role" "cognito_postconfirm" {
+  name = "${var.project_name}-cognito-postconfirm"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "cognito_postconfirm_logs" {
+  role       = aws_iam_role.cognito_postconfirm.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "cognito_postconfirm_secrets" {
+  name = "${var.project_name}-postconfirm-secrets"
+  role = aws_iam_role.cognito_postconfirm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "secretsmanager:GetSecretValue"
+      ]
+      Resource = [
+        aws_secretsmanager_secret.n8n_api_key.arn,
+        aws_secretsmanager_secret.openwebui_api_key.arn
+      ]
+    }]
+  })
+}
+
+resource "aws_lambda_function" "cognito_postconfirm" {
+  function_name    = "${var.project_name}-cognito-postconfirm"
+  filename         = data.archive_file.cognito_postconfirm.output_path
+  source_code_hash = data.archive_file.cognito_postconfirm.output_base64sha256
+  role             = aws_iam_role.cognito_postconfirm.arn
+  handler          = "handler.handler"
+  runtime          = "python3.12"
+  timeout          = 15
+
+  environment {
+    variables = {
+      USER_PROVISIONING_QUEUE_URL = aws_sqs_queue.user_provisioning.url
+    }
+  }
+
+  tags = {
+    Name = "${var.project_name}-cognito-postconfirm"
+  }
+}
+
+resource "aws_lambda_permission" "cognito_postconfirm" {
+  statement_id  = "AllowCognitoInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cognito_postconfirm.function_name
   principal     = "cognito-idp.amazonaws.com"
   source_arn    = aws_cognito_user_pool.pluto.arn
 }

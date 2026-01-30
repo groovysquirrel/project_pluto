@@ -30,8 +30,17 @@ resource "aws_ecr_repository" "pluto" {
 resource "aws_efs_file_system" "pluto" {
   encrypted = true
 
+  # Enable EFS protection policy to prevent accidental root deletion
+  protection {
+    replication_overwrite = "DISABLED"
+  }
+
   tags = {
     Name = "${var.project_name}-efs"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -44,6 +53,12 @@ resource "aws_efs_mount_target" "pluto" {
 
 resource "aws_efs_access_point" "openwebui" {
   file_system_id = aws_efs_file_system.pluto.id
+
+  # Enforce POSIX user for container access (OpenWebUI runs as UID 1000)
+  posix_user {
+    uid = 1000
+    gid = 1000
+  }
 
   root_directory {
     path = "/openwebui"

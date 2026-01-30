@@ -22,31 +22,43 @@ resource "aws_lb" "pluto" {
 # -----------------------------------------------------------------------------
 
 resource "aws_lb_target_group" "portal" {
-  name        = "${var.project_name}-portal"
-  port        = 80
+  name_prefix = "portal"  # Use prefix for create_before_destroy
+  port        = 4180  # oauth2-proxy port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.pluto.id
   target_type = "ip"
   health_check {
-    path = "/"
-    matcher = "200-302"
+    path    = "/ping"  # oauth2-proxy health endpoint
+    matcher = "200"
+  }
+  tags = {
+    Name = "${var.project_name}-portal"
+  }
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
 resource "aws_lb_target_group" "openwebui" {
-  name        = "${var.project_name}-openwebui"
-  port        = 8080  # OpenWebUI direct (native OIDC, no oauth2-proxy)
+  name_prefix = "owui"  # Use prefix for create_before_destroy (max 6 chars)
+  port        = 4180  # oauth2-proxy port (trusted header auth)
   protocol    = "HTTP"
   vpc_id      = aws_vpc.pluto.id
   target_type = "ip"
   health_check {
-    path    = "/health"  # OpenWebUI health endpoint
+    path    = "/ping"  # oauth2-proxy health endpoint
     matcher = "200"
+  }
+  tags = {
+    Name = "${var.project_name}-openwebui"
+  }
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
 resource "aws_lb_target_group" "litellm" {
-  name        = "${var.project_name}-litellm"
+  name_prefix = "litell"  # Use prefix for create_before_destroy (max 6 chars)
   port        = 4180  # oauth2-proxy port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.pluto.id
@@ -55,10 +67,16 @@ resource "aws_lb_target_group" "litellm" {
     path    = "/ping"  # oauth2-proxy health endpoint
     matcher = "200"
   }
+  tags = {
+    Name = "${var.project_name}-litellm"
+  }
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_target_group" "n8n" {
-  name        = "${var.project_name}-n8n"
+  name_prefix = "n8n"  # Use prefix for create_before_destroy
   port        = 4180  # oauth2-proxy port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.pluto.id
@@ -66,6 +84,12 @@ resource "aws_lb_target_group" "n8n" {
   health_check {
     path    = "/ping"  # oauth2-proxy health endpoint
     matcher = "200"
+  }
+  tags = {
+    Name = "${var.project_name}-n8n"
+  }
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -95,7 +119,7 @@ resource "aws_lb_listener" "https" {
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn   = aws_acm_certificate_validation.pluto.certificate_arn
 
-  # Default: Go to Portal
+  # Default: Go to portal
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.portal.arn
@@ -106,7 +130,7 @@ resource "aws_lb_listener" "https" {
 # LISTENER RULES
 # -----------------------------------------------------------------------------
 
-# OpenWebUI - oauth2-proxy handles authentication, no ALB Cognito needed
+# OpenWebUI
 resource "aws_lb_listener_rule" "openwebui" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 100
@@ -123,8 +147,7 @@ resource "aws_lb_listener_rule" "openwebui" {
   }
 }
 
-# LiteLLM - oauth2-proxy handles authentication
-# API paths bypass auth via OAUTH2_PROXY_SKIP_AUTH_ROUTES in the container
+# LiteLLM
 resource "aws_lb_listener_rule" "litellm" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 190
@@ -141,7 +164,7 @@ resource "aws_lb_listener_rule" "litellm" {
   }
 }
 
-# N8N - oauth2-proxy handles authentication
+# N8N
 resource "aws_lb_listener_rule" "n8n" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 300

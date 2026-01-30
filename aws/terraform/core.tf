@@ -90,11 +90,11 @@ locals {
     n8n       = "${var.project_name}-n8n"
   }
 
-  # Internal service discovery endpoints
+  # Internal service discovery endpoints (AWS ECS Service Connect)
   internal_services = {
-    portal    = "portal.pluto.local"
-    litellm   = "litellm.pluto.local"
-    openwebui = "openwebui.pluto.local"
-    n8n       = "n8n.pluto.local"
+    portal    = "portal.pluto.aws"
+    litellm   = "litellm.pluto.aws"
+    openwebui = "openwebui.pluto.aws"
+    n8n       = "n8n.pluto.aws"
   }
 }

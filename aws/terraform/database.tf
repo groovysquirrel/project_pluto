@@ -27,8 +27,11 @@ resource "aws_rds_cluster" "pluto" {
   master_password        = random_password.db_password.result
   db_subnet_group_name   = aws_db_subnet_group.pluto.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  skip_final_snapshot    = true
-  deletion_protection    = false
+
+  # Data protection settings
+  deletion_protection      = true
+  skip_final_snapshot      = false
+  final_snapshot_identifier = "${var.project_name}-db-final-snapshot"
 
   # Enable Data API for Query Editor access
   enable_http_endpoint = true
@@ -40,6 +43,10 @@ resource "aws_rds_cluster" "pluto" {
 
   tags = {
     Name = "${var.project_name}-aurora"
+  }
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -177,4 +184,15 @@ resource "aws_secretsmanager_secret" "litellm_database_url" {
 resource "aws_secretsmanager_secret_version" "litellm_database_url" {
   secret_id = aws_secretsmanager_secret.litellm_database_url.id
   secret_string = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_proxy.pluto.endpoint}:5432/litellm?sslmode=require"
+}
+
+# Separate database for vector embeddings (pgvector)
+resource "aws_secretsmanager_secret" "pgvector_database_url" {
+  name                    = "${var.project_name}/pgvector_database_url"
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "pgvector_database_url" {
+  secret_id = aws_secretsmanager_secret.pgvector_database_url.id
+  secret_string = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_proxy.pluto.endpoint}:5432/vectors?sslmode=require"
 }
