@@ -296,7 +296,11 @@ resource "aws_ecs_task_definition" "litellm" {
         { name = "OAUTH2_PROXY_COOKIE_REFRESH", value = "1h" },
         { name = "OAUTH2_PROXY_COOKIE_EXPIRE", value = "168h" },
         { name = "OAUTH2_PROXY_CODE_CHALLENGE_METHOD", value = "S256" },
-        { name = "OAUTH2_PROXY_SKIP_AUTH_ROUTES", value = "^/(v1|health|chat|key|model/info|models)(/.*)?$" },
+        # Skip Cognito for any LiteLLM API or admin REST path so callers can
+        # authenticate with the LiteLLM master key / virtual keys instead.
+        # Anything not matched here (e.g. "/", "/ui/*", "/oauth2/*") still goes
+        # through Cognito.
+        { name = "OAUTH2_PROXY_SKIP_AUTH_ROUTES", value = "^/(v1|chat|completions|embeddings|responses|moderations|images|audio|files|batches|fine_tuning|assistants|threads|health|key|model|models|spend|team|customer|user|global|cache|metrics|test|sso|provider|guardrails|rerank|utils|engines|anthropic)(/.*)?$" },
       ]
       secrets = [
         { name = "OAUTH2_PROXY_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.cognito_client_secret.arn },
@@ -328,18 +332,17 @@ resource "aws_ecs_task_definition" "litellm" {
         { name = "STORE_MODEL_IN_DB", value = "True" },
         { name = "PROXY_ADMIN_ID", value = "jstmaurice@infotech.com" },
         { name = "PROXY_BASE_URL", value = "https://${local.service_hosts.litellm}" },
-        { name = "GENERIC_CLIENT_ID", value = aws_cognito_user_pool_client.alb.id },
-        { name = "GENERIC_AUTHORIZATION_ENDPOINT", value = "https://${var.cognito_custom_domain}/oauth2/authorize" },
-        { name = "GENERIC_TOKEN_ENDPOINT", value = "https://${var.cognito_custom_domain}/oauth2/token" },
-        { name = "GENERIC_USERINFO_ENDPOINT", value = "https://${var.cognito_custom_domain}/oauth2/userInfo" },
-        { name = "GENERIC_SCOPE", value = "openid email profile" },
+        # UI username (password is injected via Secrets Manager below)
+        { name = "UI_USERNAME", value = "admin" },
         # Logout redirect: oauth2-proxy → Cognito logout → Portal
         { name = "PROXY_LOGOUT_URL", value = "/oauth2/sign_out?rd=https%3A%2F%2F${var.cognito_custom_domain}%2Flogout%3Fclient_id%3D${aws_cognito_user_pool_client.alb.id}%26logout_uri%3Dhttps%253A%252F%252F${local.domain_root}" }
       ]
       secrets = [
         { name = "LITELLM_MASTER_KEY", valueFrom = aws_secretsmanager_secret.litellm_master_key.arn },
         { name = "DATABASE_URL", valueFrom = aws_secretsmanager_secret.litellm_database_url.arn },
-        { name = "GENERIC_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.cognito_client_secret.arn }
+        # Reuse the master key as the admin UI login password — same blast radius
+        # (master-key holder is already full admin), one secret to rotate.
+        { name = "UI_PASSWORD", valueFrom = aws_secretsmanager_secret.litellm_master_key.arn }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -587,6 +590,10 @@ resource "aws_ecs_task_definition" "openwebui" {
         # a user account with the "user" role (not admin).
         # { name = "ENABLE_SIGNUP", value = "true" },
         { name = "DEFAULT_USER_ROLE", value = "user" },
+
+        # Force admins to respect per-resource ACLs (notes, knowledge, etc.)
+        # rather than seeing every user's content by default.
+        { name = "BYPASS_ADMIN_ACCESS_CONTROL", value = "False" },
 
         # Enable SCIM 2.0 API for programmatic user provisioning
         { name = "SCIM_ENABLED", value = "true" },

@@ -323,7 +323,7 @@ services:
   # will forward requests to the actual LLM (Bedrock, OpenAI, etc.)
 
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    image: ghcr.io/berriai/litellm:main-stable
     container_name: app-litellm
     restart: unless-stopped
     security_opt:
@@ -427,7 +427,7 @@ services:
   #   - And much more!
 
   openwebui:
-    image: ghcr.io/open-webui/open-webui:main
+    image: ghcr.io/open-webui/open-webui:0.9.2
     container_name: app-openwebui
     restart: unless-stopped
     security_opt:
@@ -467,6 +467,10 @@ services:
       # After first admin is created, new users get 'pending' status (need approval)
       # Change to 'user' if you want auto-approval
       DEFAULT_USER_ROLE: pending
+
+      # Admins respect per-resource ACLs (notes, knowledge, etc.) instead of
+      # seeing every user's content. Default in OpenWebUI is True.
+      BYPASS_ADMIN_ACCESS_CONTROL: "False"
 
       # Secret key for session tokens - prevents logout on container restart
       # SECURITY: No default - must be set in .env
