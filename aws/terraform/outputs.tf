@@ -86,3 +86,12 @@ output "ses_sending_email" {
   value       = aws_ses_email_identity.system.email
   description = "SES verified email address for sending"
 }
+
+# AWS Secrets Manager is the source of truth for LITELLM_MASTER_KEY.
+# deploy.sh mirrors this value into the repo-root .env so local Docker tooling
+# (and any local clients pointed at the AWS LiteLLM endpoint) use the same key.
+output "litellm_master_key" {
+  value       = aws_secretsmanager_secret_version.litellm_master_key.secret_string
+  sensitive   = true
+  description = "LiteLLM master key — authoritative copy lives in AWS Secrets Manager."
+}

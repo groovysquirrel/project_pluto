@@ -334,10 +334,10 @@ EOF
     aws ecr get-login-password --region "$REGION" | crane auth login "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com" --username AWS --password-stdin
 
     print_info "Copying OpenWebUI..."
-    crane copy --platform linux/amd64 ghcr.io/open-webui/open-webui:0.7.2 "${OPENWEBUI_REPO}:${IMAGE_TAG}"
+    crane copy --platform linux/amd64 ghcr.io/open-webui/open-webui:0.9.2 "${OPENWEBUI_REPO}:${IMAGE_TAG}"
 
     print_info "Copying LiteLLM..."
-    crane copy --platform linux/amd64 ghcr.io/berriai/litellm:main-latest "${LITELLM_REPO}:${IMAGE_TAG}"
+    crane copy --platform linux/amd64 ghcr.io/berriai/litellm:main-stable "${LITELLM_REPO}:${IMAGE_TAG}"
 
     print_info "Copying n8n..."
     crane copy --platform linux/amd64 docker.io/n8nio/n8n:latest "${N8N_REPO}:${IMAGE_TAG}"
@@ -372,6 +372,43 @@ for SERVICE in portal litellm openwebui n8n auth-proxy; do
         print_warning "${SERVICE} could not be refreshed (may not exist yet or still deploying)"
     fi
 done
+
+# ------------------------------------------------------------------------------
+# STEP 7: SYNC AWS-AUTHORITATIVE SECRETS INTO REPO .env
+# ------------------------------------------------------------------------------
+# AWS Secrets Manager is the source of truth. We mirror LITELLM_MASTER_KEY into
+# the repo-root .env so local Docker dev (and any local CLI pointed at the AWS
+# LiteLLM endpoint) uses the same key without manual copy/paste.
+
+print_header "STEP 7: Syncing secrets into .env"
+
+ENV_FILE="${REPO_ROOT}/.env"
+
+# Update or append a KEY=VALUE line in $ENV_FILE without touching other lines.
+update_env_var() {
+    local key="$1"
+    local value="$2"
+
+    if [[ ! -f "$ENV_FILE" ]]; then
+        print_warning ".env not found at $ENV_FILE — skipping sync"
+        return
+    fi
+
+    if grep -q "^${key}=" "$ENV_FILE"; then
+        # -i.bak works on both BSD (macOS) and GNU sed; we delete the backup after.
+        sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+    else
+        echo "${key}=${value}" >> "$ENV_FILE"
+    fi
+}
+
+LITELLM_KEY=$(terraform -chdir="$TF_DIR" output -raw litellm_master_key 2>/dev/null || echo "")
+if [[ -n "$LITELLM_KEY" ]]; then
+    update_env_var "LITELLM_MASTER_KEY" "$LITELLM_KEY"
+    print_success "LITELLM_MASTER_KEY synced from AWS into .env"
+else
+    print_warning "Could not read litellm_master_key output — .env not updated"
+fi
 
 # ------------------------------------------------------------------------------
 # COMPLETE
